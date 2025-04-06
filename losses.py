@@ -14,3 +14,7 @@ def l1_weight(rnn, scale):
 def l1_rate(act, scale):
     l1 = scale * torch.mean(torch.abs(torch.flatten(act)))
     return l1
+
+def l1_muscle_act(act, scale):
+    l1 = scale * torch.sum(act)
+    return l1

@@ -7,7 +7,7 @@ import random
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from model import Policy
-from losses import l1_dist, l1_rate, l1_weight
+from losses import l1_dist, l1_rate, l1_weight, l1_muscle_act
 from envs import RandomReach, DlyRandomReach, Maze
 from utils import save_hp, create_dir
 
@@ -17,13 +17,14 @@ DEF_HP = {
     "noise_level_inp": 0.01,
     "constrained": False,
     "dt": 10,
-    "t_const": 100,
+    "t_const": 20,
     "lr": 0.001,
     "batch_size": 16,
     "epochs": 50_000,
     "save_iter": 100,
     "l1_rate": 0.001,
-    "l1_weight": 0.001
+    "l1_weight": 0.001,
+    "l1_muscle_act": 0.001
 }
 
 def train_2link(config_path, model_path, model_file, hp=None):
@@ -54,7 +55,7 @@ def train_2link(config_path, model_path, model_file, hp=None):
         device=device
     )
 
-    optimizer = torch.optim.Adam(policy.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(policy.parameters(), lr=hp["lr"])
 
     losses = []
     interval = 10
@@ -78,6 +79,8 @@ def train_2link(config_path, model_path, model_file, hp=None):
         # initial positions and targets
         xy = [info["states"]["fingertip"][:, None, :]]
         tg = [info["goal"][:, None, :]]
+        muscle_acts = [info["states"]["muscle"][:, 0].unsqueeze(1)]
+        hs = [h.unsqueeze(1)]
 
         timestep = 0
         # simulate whole episode
@@ -87,17 +90,22 @@ def train_2link(config_path, model_path, model_file, hp=None):
 
             xy.append(info["states"]["fingertip"][:, None, :])  # trajectories
             tg.append(info["goal"][:, None, :])  # targets
+            muscle_acts.append(info["states"]["muscle"][:, 0].unsqueeze(1))
+            hs.append(h.unsqueeze(1))
 
             timestep += 1
 
         # concatenate into a (batch_size, n_timesteps, xy) tensor
-        xy = torch.cat(xy, axis=0)
-        tg = torch.cat(tg, axis=0)
+        xy = torch.cat(xy, axis=1)
+        tg = torch.cat(tg, axis=1)
+        muscle_acts = torch.cat(muscle_acts, axis=1)
+        hs = torch.cat(hs, axis=1)
 
         # Implement loss function
         loss = l1_dist(xy, tg)  # L1 loss on position
-        loss += l1_rate(h, hp["l1_rate"])
+        loss += l1_rate(hs, hp["l1_rate"])
         loss += l1_weight(policy, hp["l1_weight"])
+        loss += l1_muscle_act(muscle_acts, hp["l1_muscle_act"])
         
         # backward pass & update weights
         optimizer.zero_grad() 
@@ -110,10 +118,12 @@ def train_2link(config_path, model_path, model_file, hp=None):
         if (batch % interval == 0) and (batch != 0):
             print("Batch {}/{} Done, mean policy loss: {}".format(batch, hp["epochs"], sum(losses[-interval:])/interval))
 
+        """
         if batch % hp["save_iter"] == 0:
             torch.save({
                 'agent_state_dict': policy.state_dict(),
             }, model_path + "/" + model_file)
+        """
 
 if __name__ == "__main__":
     pass
