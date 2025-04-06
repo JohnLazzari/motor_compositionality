@@ -1,0 +1,31 @@
+{
+    "recurrent_regions": [
+        {
+            "name": "region",
+            "num_units": 512,
+            "base_firing": 0,
+            "learnable_bias": true
+        }
+    ],
+
+    "recurrent_connections": [
+        {
+            "src_region": "region",
+            "dst_region": "region"
+        }
+    ],
+
+    "input_regions": [
+        {
+            "name": "inp",
+            "num_units": 17
+        }
+    ],
+
+    "input_connections": [
+        {
+            "src_region": "inp",
+            "dst_region": "region"
+        }
+    ]
+}

@@ -1,0 +1,3 @@
+[submodule "mRNNTorch"]
+	path = mRNNTorch
+	url = https://github.com/JohnLazzari/mRNNTorch.git
