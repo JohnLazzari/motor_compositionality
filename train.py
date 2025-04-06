@@ -60,7 +60,7 @@ def train_2link(config_path, model_path, model_file, hp=None):
     interval = 10
 
     env_list = [RandomReach, DlyRandomReach, Maze]
-    probs = [0.3] * len(env_list)
+    probs = [1/3, 1/3, 1/3]
 
     for batch in range(hp["epochs"]):
 

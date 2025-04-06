@@ -166,6 +166,7 @@ class DlyRandomReach(env.Environment):
         self.max_ep_duration = 2
         self.dt = 0.01
         self.go_cue = None
+        self.initial_pos = None
 
     def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
         """
@@ -234,7 +235,7 @@ class DlyRandomReach(env.Environment):
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(self.elapsed >= self.max_ep_duration)
         self.goal = self.goal.clone()
-        self.hidden_goal = self.goal.clone() if self.elapsed >= 1 else self.states["fingertip"].clone()
+        self.hidden_goal = self.goal.clone() if self.elapsed >= 1 else self.initial_pos
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -272,7 +273,8 @@ class DlyRandomReach(env.Environment):
         ], dim=-1)
 
         self.goal = self.joint2cartesian(self.effector.draw_random_uniform_states(batch_size)).chunk(2, dim=-1)[0]
-        self.hidden_goal = self.states["fingertip"].clone()
+        self.initial_pos = self.states["fingertip"].clone()
+        self.hidden_goal = self.initial_pos.clone()
         self.elapsed = 0.
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
