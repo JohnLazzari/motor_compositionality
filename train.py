@@ -17,14 +17,14 @@ DEF_HP = {
     "noise_level_inp": 0.01,
     "constrained": False,
     "dt": 10,
-    "t_const": 20,
+    "t_const": 100,
     "lr": 0.001,
     "batch_size": 16,
     "epochs": 50_000,
     "save_iter": 100,
     "l1_rate": 0.001,
     "l1_weight": 0.001,
-    "l1_muscle_act": 0.001
+    "l1_muscle_act": 0.0001
 }
 
 def train_2link(config_path, model_path, model_file, hp=None):
@@ -118,12 +118,10 @@ def train_2link(config_path, model_path, model_file, hp=None):
         if (batch % interval == 0) and (batch != 0):
             print("Batch {}/{} Done, mean policy loss: {}".format(batch, hp["epochs"], sum(losses[-interval:])/interval))
 
-        """
         if batch % hp["save_iter"] == 0:
             torch.save({
                 'agent_state_dict': policy.state_dict(),
             }, model_path + "/" + model_file)
-        """
 
 if __name__ == "__main__":
     pass
