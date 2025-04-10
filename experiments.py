@@ -24,8 +24,87 @@ env_dict = {
 }
 
 def train_rnn512_softplus():
+    model_path = "checkpoints/rnn512_softplus"
+    model_file = "rnn512_softplus.pth"
     # leave hp as default
-    train_2link(config_path, model_path, model_file)
+    train_2link(model_path, model_file)
+
+def train_rnn256_softplus():
+    hp = {"hid_size": 256}
+    model_path = "checkpoints/rnn256_softplus"
+    model_file = "rnn256_softplus.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_rnn1024_softplus():
+    hp = {"hid_size": 1024}
+    model_path = "checkpoints/rnn1024_softplus"
+    model_file = "rnn1024_softplus.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_rnn512_relu():
+    hp = {"activation_name": "relu"}
+    model_path = "checkpoints/rnn512_relu"
+    model_file = "rnn512_relu.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_rnn256_relu():
+    hp = {"hid_size": 256, "activation_name": "relu"}
+    model_path = "checkpoints/rnn256_relu"
+    model_file = "rnn256_relu.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_rnn1024_relu():
+    hp = {"hid_size": 1024, "activation_name": "relu"}
+    model_path = "checkpoints/rnn1024_relu"
+    model_file = "rnn1024_relu.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_rnn512_tanh():
+    hp = {"activation_name": "tanh"}
+    model_path = "checkpoints/rnn512_tanh"
+    model_file = "rnn512_tanh.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_rnn256_tanh():
+    hp = {"hid_size": 256, "activation_name": "tanh"}
+    model_path = "checkpoints/rnn256_tanh"
+    model_file = "rnn256_tanh.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_rnn1024_tanh():
+    hp = {"hid_size": 1024, "activation_name": "tanh"}
+    model_path = "checkpoints/rnn1024_tanh"
+    model_file = "rnn1024_tanh.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_gru512():
+    hp = {"network": "gru"}
+    model_path = "checkpoints/gru512"
+    model_file = "gru512.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_gru256():
+    hp = {"hid_size": 256, "network": "gru"}
+    model_path = "checkpoints/gru256"
+    model_file = "gru256.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
+
+def train_gru1024():
+    hp = {"hid_size": 1024, "network": "gru"}
+    model_path = "checkpoints/gru1024"
+    model_file = "gru1024.pth"
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
 
 def _test(config_path, model_path, model_file, options, env):
     """ Function will save all relevant data from a test run of a given env
@@ -180,8 +259,30 @@ if __name__ == "__main__":
     parser = config.config_parser()
     args = parser.parse_args()
     
-    if args.experiment == "train_2link_multi":
-        train_2link_multi(args.config_path, args.model_path, args.model_file) 
+    if args.experiment == "train_rnn256_softplus":
+        train_rnn256_softplus() 
+    elif args.experiment == "train_rnn512_softplus":
+        train_rnn512_softplus() 
+    elif args.experiment == "train_rnn1024_softplus":
+        train_rnn1024_softplus() 
+    elif args.experiment == "train_rnn256_relu":
+        train_rnn256_relu() 
+    elif args.experiment == "train_rnn512_relu":
+        train_rnn512_relu() 
+    elif args.experiment == "train_rnn1024_relu":
+        train_rnn1024_relu() 
+    elif args.experiment == "train_rnn256_tanh":
+        train_rnn256_tanh() 
+    elif args.experiment == "train_rnn512_tanh":
+        train_rnn512_tanh() 
+    elif args.experiment == "train_rnn1024_tanh":
+        train_rnn1024_tanh() 
+    elif args.experiment == "train_gru256":
+        train_gru256() 
+    elif args.experiment == "train_gru512":
+        train_gru512() 
+    elif args.experiment == "train_gru1024":
+        train_gru1024() 
     elif args.experiment == "plot_task_trajectories":
         plot_task_trajectories(args.config_path, args.model_path, args.model_file, args.exp_path) 
     elif args.experiment == "plot_task_kinematics":

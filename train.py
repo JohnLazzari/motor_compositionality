@@ -6,13 +6,16 @@ import random
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from model import RNNPolicy
+from model import RNNPolicy, GRUPolicy
 from losses import l1_dist, l1_rate, l1_weight, l1_muscle_act
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 from utils import save_hp, create_dir
 
 DEF_HP = {
+    "network": "rnn",
+    "inp_size": 33,
+    "hid_size": 512,
     "activation_name": "softplus",
     "noise_level_act": 0.1,
     "noise_level_inp": 0.01,
@@ -28,7 +31,7 @@ DEF_HP = {
     "l1_muscle_act": 0.0001
 }
 
-def train_2link(config_path, model_path, model_file, hp=None):
+def train_2link(model_path, model_file, hp=None):
 
     # create model path for saving model and hp
     create_dir(model_path)
@@ -44,17 +47,23 @@ def train_2link(config_path, model_path, model_file, hp=None):
     device = torch.device("cpu")
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
 
-    policy = RNNPolicy(
-        config_path, 
-        effector.n_muscles, 
-        activation_name=hp["activation_name"],
-        noise_level_act=hp["noise_level_act"], 
-        noise_level_inp=hp["noise_level_inp"], 
-        constrained=hp["constrained"], 
-        dt=hp["dt"],
-        t_const=hp["t_const"],
-        device=device
-    )
+    if hp["network"] == "rnn":
+        policy = RNNPolicy(
+            hp["inp_size"],
+            hp["hid_size"],
+            effector.n_muscles, 
+            activation_name=hp["activation_name"],
+            noise_level_act=hp["noise_level_act"], 
+            noise_level_inp=hp["noise_level_inp"], 
+            constrained=hp["constrained"], 
+            dt=hp["dt"],
+            t_const=hp["t_const"],
+            device=device
+        )
+    elif hp["network"] == "gru":
+        policy = GRUPolicy(hp["inp_size"], hp["hid_size"], effector.n_muscles, batch_first=True)
+    else:
+        raise ValueError("Not a valid architecture")
 
     optimizer = torch.optim.Adam(policy.parameters(), lr=hp["lr"])
 
@@ -74,7 +83,6 @@ def train_2link(config_path, model_path, model_file, hp=None):
         DlyFigure8Inv
     ]
     probs = [1/len(env_list)] * len(env_list)
-    #probs = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     for batch in range(hp["epochs"]):
 
