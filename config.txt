@@ -1,0 +1,5 @@
+config_path=configurations/mrnn.json
+model_path=checkpoints/mrnn
+model_file=mrnn.pth
+exp_path=results/mrnn/kinematics
+experiment=train_2link_multi

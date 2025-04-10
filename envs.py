@@ -959,7 +959,7 @@ class DlyFullCircleClk(env.Environment):
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
-        traj_points = th.linspace(2 * np.pi, 0, 200)
+        traj_points = th.linspace(np.pi, -np.pi, 200)
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in traj_points], dim=0)
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
@@ -1388,7 +1388,7 @@ class DlyFigure8Inv(env.Environment):
         y_points_forward = -th.sin(th.linspace(0, 2*np.pi, 100))
 
         x_points_back = th.linspace(1, 0, 100)
-        y_points_back = th.sin(th.linspace(0, 2*np.pi, 100))
+        y_points_back = th.sin(th.linspace(2*np.pi, 0, 100))
 
         # Compute (x, y) coordinates for each angle
         points_forward = th.stack([x_points_forward, y_points_forward], dim=1) * 0.25

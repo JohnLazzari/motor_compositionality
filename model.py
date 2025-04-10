@@ -2,10 +2,11 @@ import torch
 import torch.nn as nn
 from mRNNTorch.mRNN import mRNN
 
-class Policy(nn.Module):
+class RNNPolicy(nn.Module):
     def __init__(
             self, 
-            config, 
+            inp_size,
+            hid_size,
             output_dim, 
             activation_name="softplus",
             noise_level_act=0.01, 
@@ -18,11 +19,10 @@ class Policy(nn.Module):
             upper_bound_rec=10,
             lower_bound_inp=0,
             upper_bound_inp=10,
-            device="cuda"
+            device="cpu"
         ):
         super().__init__()
 
-        self.config = config
         self.output_dim = output_dim
         self.n_layers = 1
         self.constrained = constrained
@@ -39,7 +39,6 @@ class Policy(nn.Module):
         self.upper_bound_inp = upper_bound_inp
 
         self.mrnn = mRNN(
-            config=config, 
             activation=activation_name,
             noise_level_act=noise_level_act, 
             noise_level_inp=noise_level_inp, 
@@ -54,6 +53,18 @@ class Policy(nn.Module):
             device=device
         )
 
+        # Add Region
+        self.mrnn.add_recurrent_region("region", hid_size, learnable_bias=True)
+        # Add Input
+        self.mrnn.add_input_region("input", inp_size)
+
+        # Add connections
+        self.mrnn.add_recurrent_connection("region", "region")
+        self.mrnn.add_input_connection("input", "region")
+
+        # Finalize connectivity
+        self.mrnn.finalize_connectivity()
+
         self.fc = torch.nn.Linear(self.mrnn.total_num_units, output_dim)
         self.sigmoid = torch.nn.Sigmoid()
 
@@ -62,6 +73,38 @@ class Policy(nn.Module):
     def forward(self, h, obs, *args, noise=True):
         # Forward pass through mRNN
         x, h = self.mrnn(h, obs[:, None, :], *args, noise=noise)
+        # Squeeze in the time dimension (doing timesteps one by one)
+        h = h.squeeze(1)
+        # Motor output
+        u = self.sigmoid(self.fc(h)).squeeze(dim=1)
+        return x, h, u
+
+
+class GRUPolicy(nn.Module):
+    def __init__(
+            self, 
+            inp_size,
+            hid_size,
+            output_dim, 
+            batch_first=True,
+            device="cpu"
+        ):
+        super().__init__()
+
+        self.output_dim = output_dim
+        self.device = device
+        self.batch_first = batch_first
+
+        self.gru = nn.GRU(inp_size, hid_size, batch_first=batch_first)
+
+        self.fc = torch.nn.Linear(self.mrnn.total_num_units, output_dim)
+        self.sigmoid = torch.nn.Sigmoid()
+
+        self.to(device)
+
+    def forward(self, h, obs):
+        # Forward pass through mRNN
+        x, h = self.mrnn(obs[:, None, :], h)
         # Squeeze in the time dimension (doing timesteps one by one)
         h = h.squeeze(1)
         # Motor output

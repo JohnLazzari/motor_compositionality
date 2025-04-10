@@ -6,7 +6,7 @@ import random
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from model import Policy
+from model import RNNPolicy
 from losses import l1_dist, l1_rate, l1_weight, l1_muscle_act
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
@@ -25,7 +25,7 @@ DEF_HP = {
     "save_iter": 100,
     "l1_rate": 0.001,
     "l1_weight": 0.001,
-    "l1_muscle_act": 0.001
+    "l1_muscle_act": 0.0001
 }
 
 def train_2link(config_path, model_path, model_file, hp=None):
@@ -44,7 +44,7 @@ def train_2link(config_path, model_path, model_file, hp=None):
     device = torch.device("cpu")
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
 
-    policy = Policy(
+    policy = RNNPolicy(
         config_path, 
         effector.n_muscles, 
         activation_name=hp["activation_name"],

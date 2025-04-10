@@ -1,18 +1,33 @@
 from train import train_2link
 import motornet as mn
-from model import Policy
+from model import RNNPolicy
 import torch
 import os
 from utils import load_hp, create_dir, save_fig
+from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
+from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 import matplotlib.pyplot as plt
 import numpy as np
-import argparse
+import config
 
-def train_2link_multi(config_path, model_path, model_file):
+env_dict = {
+    "DlyHalfReach": DlyHalfReach, 
+    "DlyHalfCircleClk": DlyHalfCircleClk, 
+    "DlyHalfCircleCClk": DlyHalfCircleCClk, 
+    "DlySinusoid": DlySinusoid, 
+    "DlySinusoidInv": DlySinusoidInv,
+    "DlyFullReach": DlyFullReach,
+    "DlyFullCircleClk": DlyFullCircleClk,
+    "DlyFullCircleCClk": DlyFullCircleCClk,
+    "DlyFigure8": DlyFigure8,
+    "DlyFigure8Inv": DlyFigure8Inv
+}
+
+def train_rnn512_softplus():
     # leave hp as default
     train_2link(config_path, model_path, model_file)
 
-def _test(config_path, model_path, model_file, options, env="RandomReach", joint_state=None):
+def _test(config_path, model_path, model_file, options, env):
     """ Function will save all relevant data from a test run of a given env
 
     Args:
@@ -29,18 +44,10 @@ def _test(config_path, model_path, model_file, options, env="RandomReach", joint
     
     device = "cpu"
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-
-    if env == "RandomReach":
-        env = RandomReach(effector=effector)
-    elif env == "DlyRandomReach":
-        env = DlyRandomReach(effector=effector)
-    elif env == "Maze":
-        env = Maze(effector=effector)
-    elif env == "CenterOutReach":
-        env = CenterOutReach(effector=effector)
+    env = env(effector=effector)
 
     # Loading in model
-    policy = Policy(
+    policy = RNNPolicy(
         config_path, 
         effector.n_muscles, 
         activation_name=hp["activation_name"],
@@ -58,11 +65,6 @@ def _test(config_path, model_path, model_file, options, env="RandomReach", joint
     # initialize batch
     h = torch.zeros(size=(hp["batch_size"], policy.mrnn.total_num_units))
     
-    if joint_state == "center":
-        joint_state = torch.tensor([effector.pos_range_bound[0] * 0.5 + effector.pos_upper_bound[0] + 0.1, 
-                                    effector.pos_range_bound[1] * 0.5 + effector.pos_upper_bound[1] + 0.5, 0, 0
-        ]).unsqueeze(0).repeat(hp["batch_size"], 1)
-
     obs, info = env.reset(options=options)
     terminated = False
     trial_data = {}
@@ -93,124 +95,80 @@ def _test(config_path, model_path, model_file, options, env="RandomReach", joint
 
     return trial_data
 
-def center_out(config_path, model_path, model_file, exp_path):
+def plot_task_trajectories(config_path, model_path, model_file, exp_path):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
+
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
 
     create_dir(exp_path)
 
     options = {"batch_size": 8, "reach_conds": torch.arange(0, 8, 1)}
 
-    trial_data = _test(config_path, model_path, model_file, options, env="CenterOutReach")
+    for env in env_dict:
+
+        trial_data = _test(config_path, model_path, model_file, options, env=env_dict[env])
     
-    # Get kinematics and activity in a center out setting
-    # On random and delay
-    colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
+        # Get kinematics and activity in a center out setting
+        # On random and delay
+        colors = plt.cm.inferno(np.linspace(0, 1, trial_data["tg"].shape[1])) 
 
-    for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
-        color = colors[i]
-        plt.plot(xy[:, 0], xy[:, 1], color=color)
-        plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=color)
-        plt.scatter(tg[:, 0], tg[:, 1], s=150, marker='^', color=color)
-    save_fig(os.path.join(exp_path, "kinematics.png"))
+        for i, tg in enumerate(trial_data["tg"]):
+            plt.scatter(tg[:, 0], tg[:, 1], s=10, color=colors)
+            plt.scatter(tg[0, 0], tg[0, 1], s=150, marker='x', color="black")
+            plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
+        save_fig(os.path.join(exp_path, f"{env}_tg_trajectory.png"))
 
-    for i, act in enumerate(trial_data["h"]):
-        color = colors[i]
-        plt.plot(torch.mean(act, dim=-1), color=color)
-    save_fig(os.path.join(exp_path, "psth.png"))
+        for i, inp in enumerate(trial_data["obs"]):
+            fig, ax = plt.subplots(5, 1)
+            ax[0].imshow(inp[:, :10].T, cmap="Blues", aspect="auto")
+            ax[0].set_xticks([])
+            ax[0].set_yticks([])
+            ax[1].plot(inp[:, 10:11], color="blue")
+            ax[1].set_xticks([])
+            ax[1].set_yticks([])
+            ax[2].imshow(inp[:, 11:19].T, cmap="Blues", aspect="auto")
+            ax[2].set_xticks([])
+            ax[2].set_yticks([])
+            ax[3].imshow(inp[:, 19:21].T, cmap="Blues", aspect="auto")
+            ax[3].set_xticks([])
+            ax[3].set_yticks([])
+            ax[4].imshow(inp[:, 21:33].T, cmap="Blues", aspect="auto")
+            save_fig(os.path.join(exp_path, f"{env}_input_orientation{i}"))
+            
+def plot_task_kinematics(config_path, model_path, model_file, exp_path):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
 
-def dly_center_out(config_path, model_path, model_file, exp_path):
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
 
     create_dir(exp_path)
 
     options = {"batch_size": 8, "reach_conds": torch.arange(0, 8, 1)}
 
-    trial_data = _test(config_path, model_path, model_file, options, env="CenterOutReach")
+    for env in env_dict:
+
+        trial_data = _test(config_path, model_path, model_file, options, env=env_dict[env])
     
-    # Get kinematics and activity in a center out setting
-    # On random and delay
-    colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
+        # Get kinematics and activity in a center out setting
+        # On random and delay
+        colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[1])) 
 
-    for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
-        color = colors[i]
-        plt.plot(xy[:, 0], xy[:, 1], color=color)
-        plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=color)
-        plt.scatter(tg[:, 0], tg[:, 1], s=150, marker='^', color=color)
-    save_fig(os.path.join(exp_path, "kinematics.png"))
-
-    for i, act in enumerate(trial_data["h"]):
-        color = colors[i]
-        plt.plot(torch.mean(act, dim=-1), color=color)
-    save_fig(os.path.join(exp_path, "psth.png"))
-
-def center_out_random(config_path, model_path, model_file, exp_path):
-
-    create_dir(exp_path)
-
-    trial_data = _test(config_path, model_path, model_file, joint_state="center")
-    
-    # Get kinematics and activity in a center out setting
-    # On random and delay
-    colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
-
-    for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
-        color = colors[i]
-        plt.plot(xy[:, 0], xy[:, 1], color=color)
-        plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=color)
-        plt.scatter(tg[:, 0], tg[:, 1], s=150, marker='^', color=color)
-    save_fig(os.path.join(exp_path, "kinematics.png"))
-
-    for i, act in enumerate(trial_data["h"]):
-        color = colors[i]
-        plt.plot(torch.mean(act, dim=-1), color=color)
-    save_fig(os.path.join(exp_path, "psth.png"))
-
-def center_out_dlyrandom(config_path, model_path, model_file, exp_path):
-
-    create_dir(exp_path)
-
-    trial_data = _test(config_path, model_path, model_file, joint_state="center", env="DlyRandomReach")
-
-    # Get kinematics and activity in a center out setting
-    # On random and delay
-    colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
-
-    for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
-        color = colors[i]
-        plt.plot(xy[:, 0], xy[:, 1], color=color)
-        plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=color)
-        plt.scatter(tg[:, 0], tg[:, 1], s=150, marker='^', color=color)
-    save_fig(os.path.join(exp_path, "kinematics.png"))
-
-    for i, act in enumerate(trial_data["h"]):
-        color = colors[i]
-        plt.plot(torch.mean(act, dim=-1), color=color)
-    plt.axvline(x=100, color='grey', linestyle='--')
-    
-    save_fig(os.path.join(exp_path, "psth.png"))
-
-def center_out_maze(config_path, model_path, model_file, exp_path):
-    # Save multiple examples of kinematics and activity on maze
-    create_dir(exp_path)
-
-    trial_data = _test(config_path, model_path, model_file, batch_size=1, joint_state="center", env="Maze")
-
-    # Get kinematics and activity in a center out setting
-    # On random and delay
-    colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
-
-    for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
-        color = colors[i]
-        plt.plot(xy[:, 0], xy[:, 1], color=color)
-        plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=color)
-        plt.scatter(tg[:, 0], tg[:, 1], s=150, marker='^', color=color)
-    save_fig(os.path.join(exp_path, "kinematics.png"))
-
-    for i, act in enumerate(trial_data["h"]):
-        color = colors[i]
-        plt.plot(torch.mean(act, dim=-1), color=color)
-    plt.axvline(x=100, color='grey', linestyle='--')
-    
-    save_fig(os.path.join(exp_path, "psth.png"))
-
+        for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
+            plt.scatter(xy[:, 0], xy[:, 1], s=10, color=colors)
+            plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color="black")
+            plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
+        save_fig(os.path.join(exp_path, f"{env}_kinematics.png"))
 
 def selectivity_and_clustering():
     # Get selectivity and clusters for different movements
@@ -218,26 +176,13 @@ def selectivity_and_clustering():
 
 if __name__ == "__main__":
 
-    # Initialize the argument parser
-    parser = argparse.ArgumentParser(description="A simple argparse example")
-
-    # Add arguments to the parser
-    parser.add_argument("--config_path", type=str, default="configurations/mrnn.json")
-    parser.add_argument("--model_path", type=str, default="checkpoints/mrnn")
-    parser.add_argument("--model_file", type=str, default="mrnn.pth")
-    parser.add_argument("--exp_path", type=str, default="results/mrnn/center_out_random")
-    parser.add_argument("--experiment", type=str, default="train_2link_multi")
-
-    # Parse the command-line arguments
+    ### PARAMETERS ###
+    parser = config.config_parser()
     args = parser.parse_args()
     
     if args.experiment == "train_2link_multi":
         train_2link_multi(args.config_path, args.model_path, args.model_file) 
-    elif args.experiment == "center_out_random":
-        center_out_random(args.config_path, args.model_path, args.model_file, args.exp_path) 
-    elif args.experiment == "center_out_dlyrandom":
-        center_out_dlyrandom(args.config_path, args.model_path, args.model_file, args.exp_path) 
-    elif args.experiment == "center_out_maze":
-        center_out_maze(args.config_path, args.model_path, args.model_file, args.exp_path) 
-    elif args.experiment == "center_out":
-        center_out(args.config_path, args.model_path, args.model_file, args.exp_path) 
+    elif args.experiment == "plot_task_trajectories":
+        plot_task_trajectories(args.config_path, args.model_path, args.model_file, args.exp_path) 
+    elif args.experiment == "plot_task_kinematics":
+        plot_task_kinematics(args.config_path, args.model_path, args.model_file, args.exp_path) 
