@@ -8,7 +8,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from model import Policy
 from losses import l1_dist, l1_rate, l1_weight, l1_muscle_act
-from envs import RandomReach, DlyRandomReach, Maze
+from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
+from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 from utils import save_hp, create_dir
 
 DEF_HP = {
@@ -17,14 +18,14 @@ DEF_HP = {
     "noise_level_inp": 0.01,
     "constrained": False,
     "dt": 10,
-    "t_const": 100,
+    "t_const": 20,
     "lr": 0.001,
     "batch_size": 16,
     "epochs": 50_000,
     "save_iter": 100,
     "l1_rate": 0.001,
     "l1_weight": 0.001,
-    "l1_muscle_act": 0.0001
+    "l1_muscle_act": 0.001
 }
 
 def train_2link(config_path, model_path, model_file, hp=None):
@@ -60,8 +61,20 @@ def train_2link(config_path, model_path, model_file, hp=None):
     losses = []
     interval = 10
 
-    env_list = [RandomReach, DlyRandomReach, Maze]
-    probs = [1/3, 1/3, 1/3]
+    env_list = [
+        DlyHalfReach, 
+        DlyHalfCircleClk, 
+        DlyHalfCircleCClk, 
+        DlySinusoid, 
+        DlySinusoidInv,
+        DlyFullReach,
+        DlyFullCircleClk,
+        DlyFullCircleCClk,
+        DlyFigure8,
+        DlyFigure8Inv
+    ]
+    probs = [1/len(env_list)] * len(env_list)
+    #probs = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     for batch in range(hp["epochs"]):
 
@@ -85,6 +98,8 @@ def train_2link(config_path, model_path, model_file, hp=None):
         timestep = 0
         # simulate whole episode
         while not terminated:  # will run until `max_ep_duration` is reached
+            timestep += 1
+
             x, h, action = policy(h, obs)
             obs, reward, terminated, info = env.step(timestep, action=action)
 
@@ -92,8 +107,6 @@ def train_2link(config_path, model_path, model_file, hp=None):
             tg.append(info["goal"][:, None, :])  # targets
             muscle_acts.append(info["states"]["muscle"][:, 0].unsqueeze(1))
             hs.append(h.unsqueeze(1))
-
-            timestep += 1
 
         # concatenate into a (batch_size, n_timesteps, xy) tensor
         xy = torch.cat(xy, axis=1)
