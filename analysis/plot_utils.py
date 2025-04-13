@@ -14,11 +14,14 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 def plot_fps(fps,
+    pca_traj=None,
     state_traj=None,
     plot_batch_idx=None,
     plot_start_time=0,
     plot_stop_time=None,
     mode_scale=0.25,
+    traj_color="black",
+    marker="o",
     fig=None):
 
     '''Plots a visualization and analysis of the unique fixed points.
@@ -78,11 +81,13 @@ def plot_fps(fps,
         FIG_HEIGHT = 6 # inches
         fig = plt.figure(figsize=(FIG_WIDTH, FIG_HEIGHT),
             tight_layout=True)
+        plt.xlabel('PC 1', fontweight=FONT_WEIGHT)
+        plt.ylabel('PC 2', fontweight=FONT_WEIGHT)
 
-    if state_traj is not None:
+    if pca_traj is not None:
         
-        state_traj_bxtxd = state_traj
-        [n_batch, n_time, n_states] = state_traj_bxtxd.shape
+        pca_traj_bxtxd = pca_traj
+        [n_batch, n_time, n_states] = pca_traj_bxtxd.shape
 
         # Ensure plot_start_time >= 0
         plot_start_time = np.max([plot_start_time, 0])
@@ -101,16 +106,12 @@ def plot_fps(fps,
     if n_states >= 3:
         pca = PCA(n_components=2)
 
-        if state_traj is not None:
-            state_traj_btxd = np.reshape(state_traj_bxtxd,
+        if pca_traj is not None:
+            pca_traj_btxd = np.reshape(pca_traj_bxtxd,
                 (n_batch*n_time, n_states))
-            pca.fit(state_traj_btxd)
+            pca.fit(pca_traj_btxd)
         else:
             pca.fit(fps.xstar)
-
-        ax = fig.add_subplot(111)
-        ax.set_xlabel('PC 1', fontweight=FONT_WEIGHT)
-        ax.set_ylabel('PC 2', fontweight=FONT_WEIGHT)
 
         # For generating figure in paper.md
         #ax.set_xticks([-2, -1, 0, 1, 2])
@@ -118,34 +119,37 @@ def plot_fps(fps,
     else:
         # For 1D or 0D networks (i.e., never)
         pca = None
-        ax = fig.add_subplot(111)
-        ax.xlabel('Hidden 1', fontweight=FONT_WEIGHT)
-        if n_states == 2:
-            ax.ylabel('Hidden 2', fontweight=FONT_WEIGHT)
 
-    if state_traj is not None:
+    if pca_traj is not None and state_traj is not None:
+
+        state_traj_bxtxd = state_traj
+        [n_batch_s, n_time_s, n_states_s] = state_traj_bxtxd.shape
+
         if plot_batch_idx is None:
-            plot_batch_idx = list(range(n_batch))
+            plot_batch_idx = list(range(n_batch_s))
 
         for batch_idx in plot_batch_idx:
-            x_idx = state_traj_bxtxd[batch_idx]
+            x_idx = state_traj[batch_idx]
 
             if n_states >= 3:
                 z_idx = pca.transform(x_idx[plot_time_idx, :])
             else:
                 z_idx = x_idx[plot_time_idx, :]
-            plot_123d(ax, z_idx, color='b', linewidth=2)
+            plot_123d(z_idx, color=traj_color, linewidth=4)
+            plt.scatter(z_idx[0, 0], z_idx[0, 1], marker="^", color=traj_color, s=250, zorder=10)
+            plt.scatter(z_idx[-1, 0], z_idx[-1, 1], marker="X", color=traj_color, s=250, zorder=10)
 
     for init_idx in range(n_inits):
         plot_fixed_point(
-            ax,
             fps[init_idx],
             pca,
-            scale=mode_scale)
+            stable_marker=marker,
+            scale=mode_scale,
+            alpha=0.5)
 
     return fig
 
-def plot_fixed_point(ax, fp, pca,
+def plot_fixed_point(fp, pca,
 	scale=1.0,
 	max_n_modes=3,
 	do_plot_unstable_fps=True,
@@ -252,7 +256,7 @@ def plot_fixed_point(ax, fp, pca,
 					else:
 						zstar_mode = xstar_mode
 
-					plot_123d(ax, zstar_mode,
+					plot_123d(zstar_mode,
 					          color=color,
 					          **kwargs)
 
@@ -261,13 +265,13 @@ def plot_fixed_point(ax, fp, pca,
 		else:
 			zstar = xstar
 
-		plot_123d(ax, zstar,
+		plot_123d(zstar,
 		          color=color,
 		          marker=marker,
 		          markersize=12,
 		          **kwargs)
 
-def plot_123d(ax, z, **kwargs):
+def plot_123d(z, **kwargs):
     '''Plots in 1D, 2D, or 3D.
 
     Args:
@@ -283,8 +287,8 @@ def plot_123d(ax, z, **kwargs):
     '''
     n_states = z.shape[1]
     if n_states ==3:
-        ax.plot(z[:, 0], z[:, 1], z[:, 2], **kwargs)
+        plt.plot(z[:, 0], z[:, 1], z[:, 2], **kwargs)
     elif n_states == 2:
-        ax.plot(z[:, 0], z[:, 1], **kwargs)
+        plt.plot(z[:, 0], z[:, 1], **kwargs)
     elif n_states == 1:
-        ax.plot(z, **kwargs)
+        plt.plot(z, **kwargs)

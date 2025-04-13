@@ -14,7 +14,7 @@ from utils import save_hp, create_dir
 
 DEF_HP = {
     "network": "rnn",
-    "inp_size": 33,
+    "inp_size": 27,
     "hid_size": 512,
     "activation_name": "softplus",
     "noise_level_act": 0.1,
@@ -28,7 +28,7 @@ DEF_HP = {
     "save_iter": 100,
     "l1_rate": 0.001,
     "l1_weight": 0.001,
-    "l1_muscle_act": 0.0001
+    "l1_muscle_act": 0.001
 }
 
 def train_2link(model_path, model_file, hp=None):
@@ -87,8 +87,7 @@ def train_2link(model_path, model_file, hp=None):
     for batch in range(hp["epochs"]):
 
         # initialize batch
-        h = torch.zeros(size=(hp["batch_size"], policy.mrnn.total_num_units))
-        h = policy.mrnn.get_initial_condition(h)
+        h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
 
         rand_env = random.choices(env_list, probs)
         env = rand_env[0](effector=effector)

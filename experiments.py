@@ -3,7 +3,7 @@ import motornet as mn
 from model import RNNPolicy, GRUPolicy
 import torch
 import os
-from utils import load_hp, create_dir, save_fig
+from utils import load_hp, create_dir, save_fig, load_pickle
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 import matplotlib.pyplot as plt
@@ -13,6 +13,7 @@ from analysis.clustering import Analysis
 import pickle
 from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
 import analysis.plot_utils as plot_utils
+import tqdm as tqdm
 
 env_dict = {
     "DlyHalfReach": DlyHalfReach, 
@@ -207,7 +208,7 @@ def plot_task_trajectories(model_name):
 
     create_dir(exp_path)
 
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 8, 1)}
+    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
 
     for env in env_dict:
 
@@ -223,21 +224,68 @@ def plot_task_trajectories(model_name):
             plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
         save_fig(os.path.join(exp_path, f"{env}_tg_trajectory.png"))
 
+
+
+
+def plot_task_inputs(model_name):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
+
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/input"
+
+    create_dir(exp_path)
+
+    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
+
+    for env in env_dict:
+
+        trial_data = _test(model_path, model_file, options, env=env_dict[env])
+    
         for i, inp in enumerate(trial_data["obs"]):
-            fig, ax = plt.subplots(5, 1)
-            ax[0].imshow(inp[:, :10].T, cmap="Blues", aspect="auto")
+            fig, ax = plt.subplots(6, 1)
+            ax[0].imshow(inp[:, :10].T, cmap="seismic", aspect="auto")
+            # Remove top and right only (common for minimalist style)
+            ax[0].spines['top'].set_visible(False)
+            ax[0].spines['right'].set_visible(False)
+            ax[0].spines['bottom'].set_visible(False)
             ax[0].set_xticks([])
-            ax[0].set_yticks([])
+
             ax[1].plot(inp[:, 10:11], color="blue")
+            ax[1].spines['top'].set_visible(False)
+            ax[1].spines['right'].set_visible(False)
+            ax[1].spines['bottom'].set_visible(False)
             ax[1].set_xticks([])
-            ax[1].set_yticks([])
-            ax[2].imshow(inp[:, 11:19].T, cmap="Blues", aspect="auto")
+
+            ax[2].imshow(inp[:, 11:13].T, cmap="seismic", aspect="auto")
+            ax[2].spines['top'].set_visible(False)
+            ax[2].spines['right'].set_visible(False)
+            ax[2].spines['bottom'].set_visible(False)
             ax[2].set_xticks([])
-            ax[2].set_yticks([])
-            ax[3].imshow(inp[:, 19:21].T, cmap="Blues", aspect="auto")
+
+            ax[3].imshow(inp[:, 13:15].T, cmap="seismic", aspect="auto")
+            ax[3].spines['top'].set_visible(False)
+            ax[3].spines['right'].set_visible(False)
+            ax[3].spines['bottom'].set_visible(False)
             ax[3].set_xticks([])
-            ax[3].set_yticks([])
-            ax[4].imshow(inp[:, 21:33].T, cmap="Blues", aspect="auto")
+
+            ax[4].imshow(inp[:, 15:21].T, cmap="seismic", aspect="auto")
+            ax[4].spines['top'].set_visible(False)
+            ax[4].spines['right'].set_visible(False)
+            ax[4].spines['bottom'].set_visible(False)
+            ax[4].set_xticks([])
+
+            ax[5].imshow(inp[:, 21:27].T, cmap="seismic", aspect="auto")
+            ax[5].spines['top'].set_visible(False)
+            ax[5].spines['right'].set_visible(False)
+            ax[5].spines['bottom'].set_visible(False)
             save_fig(os.path.join(exp_path, f"{env}_input_orientation{i}"))
 
 
@@ -383,7 +431,7 @@ def plot_clusters(model_name):
 
 
 
-def plot_full_fps(model_name):
+def compute_fps(model_name):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -433,7 +481,7 @@ def plot_full_fps(model_name):
         '''Fixed point finder hyperparameters. See FixedPointFinder.py for detailed
         descriptions of available hyperparameters.'''
         fpf_hps = {
-            'max_iters': 250,
+            'max_iters': 100,
             'lr_init': 1.,
             'outlier_distance_scale': 10.0,
             'verbose': False, 
@@ -445,6 +493,8 @@ def plot_full_fps(model_name):
         for b, condition in enumerate(trial_data["h"]):
             for t, timepoint in enumerate(condition):
                 if t % 10 == 0:
+
+                    print(f"Env: {env},  Condition: {b},  Timepoint: {t}")
 
                     # Setup the fixed point finder
                     fpf = FixedPointFinder(policy.mrnn, **fpf_hps)
@@ -459,7 +509,7 @@ def plot_full_fps(model_name):
                     unique_fps, all_fps = fpf.find_fixed_points(initial_states, inputs=trial_data["obs"][b, t:t+1, :])
 
                     # Add fixed points and their info to dict
-                    env_fps_list.append({"fps": unique_fps, "t": t, "condition": b})
+                    env_fps_list.append({"fps": unique_fps, "t": t, "condition": b, "state_traj": condition})
 
         # Save all fixed points for environment
         env_fps[env] = env_fps_list
@@ -477,15 +527,34 @@ def plot_full_fps(model_name):
 def plot_fps(model_name):
 
     model_path = f"checkpoints/{model_name}"
-    model_file = f"{model_name}.pth"
+    load_name = os.path.join(model_path, "model_fps.pkl")
     exp_path = f"results/{model_name}/fps"
 
-    file_name = f"{env}_cond{b}_t{t}_fps.png"
-    
-    # Visualize identified fixed points with overlaid RNN state trajectories
-    # All visualized in the 3D PCA space fit the the example RNN states.
-    fig = plot_utils.plot_fps(unique_fps, state_traj=condition[None, ...])
-    save_fig(exp_path + "/" + file_name)
+    fps = load_pickle(load_name)
+
+    timepoints = [40, 140]
+    colors = plt.cm.inferno(np.linspace(0, 1, 8)) 
+
+    for env in fps:
+        env_fps = fps[env]
+        for i, t in enumerate(timepoints):
+            all_condition_fps = []
+            all_condition_trajs = []
+            for fp in env_fps:
+                if fp["t"] == t:
+                    all_condition_fps.append(fp["fps"])
+                    all_condition_trajs.append(fp["state_traj"])
+            
+            all_condition_trajs = torch.stack(all_condition_trajs)
+            save_name = f"{env}_t{t}_fps.png"
+            # Visualize identified fixed points with overlaid RNN state trajectories
+            # All visualized in the 3D PCA space fit the the example RNN states.
+            start_traj = 0 if i == 0 else timepoints[i-1]
+            end_traj = t
+            fig=None
+            for cond, (unique_fps, state_traj) in enumerate(zip(all_condition_fps, all_condition_trajs)):
+                fig = plot_utils.plot_fps(unique_fps, pca_traj=all_condition_trajs, state_traj=state_traj[None, ...], plot_start_time=start_traj, plot_stop_time=end_traj, fig=fig, traj_color=colors[cond])
+            save_fig(exp_path + "/" + save_name)
 
 
 
@@ -506,7 +575,7 @@ def principle_angles(model_name):
         trial_data = _test(model_path, model_file, options, env=env_dict[env])
         trial_data_envs[env] = trial_data
 
-     
+    
     
 if __name__ == "__main__":
 
@@ -540,6 +609,8 @@ if __name__ == "__main__":
         train_gru1024() 
     elif args.experiment == "plot_task_trajectories":
         plot_task_trajectories(args.model_name) 
+    elif args.experiment == "plot_task_inputs":
+        plot_task_inputs(args.model_name) 
     elif args.experiment == "plot_task_kinematics":
         plot_task_kinematics(args.model_name) 
     elif args.experiment == "variance_by_rule":
@@ -552,5 +623,7 @@ if __name__ == "__main__":
         plot_variance_by_epoch(args.model_name) 
     elif args.experiment == "plot_clusters":
         plot_clusters(args.model_name) 
-    elif args.experiment == "plot_full_fps":
-        plot_full_fps(args.model_name) 
+    elif args.experiment == "compute_fps":
+        compute_fps(args.model_name) 
+    elif args.experiment == "plot_fps":
+        plot_fps(args.model_name) 

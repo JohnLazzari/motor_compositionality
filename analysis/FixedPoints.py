@@ -502,7 +502,7 @@ class FixedPoints(object):
             AssertionError if the updated object has inconsistent data shapes.
         '''
 
-        self._assert_matching_nonspecific_attrs(self, new_fps)
+        self._assert_matching_nonspecific_attrs(new_fps)
 
         for attr_name in self._data_attrs:
 
@@ -514,10 +514,11 @@ class FixedPoints(object):
                  'FixedPoints.update does not currently support this '
                  'configuration.' % attr_name)
 
+            print([getattr(self, attr_name),getattr(new_fps, attr_name)])
             if this_has and that_has:
                 cat_attr = np.concatenate(
-                    (getattr(self, attr_name),
-                    getattr(new_fps, attr_name)),
+                    [getattr(self, attr_name),
+                    getattr(new_fps, attr_name)],
                     axis=0)
                 setattr(self, attr_name, cat_attr)
 

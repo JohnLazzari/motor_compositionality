@@ -41,7 +41,7 @@ class DlyHalfReach(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -134,7 +134,7 @@ class DlyHalfReach(env.Environment):
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
         # Generate 8 equally spaced angles
-        angles = th.linspace(0, 2 * np.pi, 9)[:-1]
+        angles = th.linspace(0, 2 * np.pi, 33)[:-1]
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in angles], dim=0)
         # this wont work yet cause everything else has shape batch_size (or I can assert reach_conds and batch_size are same shape)
@@ -145,6 +145,7 @@ class DlyHalfReach(env.Environment):
             point_idx = reach_conds
 
         goal = points[point_idx] * 0.25 + fingertip
+        self.vis_inp = goal.clone()
 
         # Draw a line from fingertip to goal 
         x_points = fingertip[:, None, 0] + th.linspace(0, 1, steps=100).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0]) 
@@ -159,10 +160,6 @@ class DlyHalfReach(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 0] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -200,7 +197,7 @@ class DlyHalfCircleClk(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -269,7 +266,7 @@ class DlyHalfCircleClk(env.Environment):
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 9)[:-1]
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
         rotated_points = th.zeros(size=(batch_size, int(1 / self.dt), 2))
         # Might be slow because I have to loop through everything
         if reach_conds is None:
@@ -288,6 +285,7 @@ class DlyHalfCircleClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
+        self.vis_inp = self.traj[:, -1, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -296,10 +294,6 @@ class DlyHalfCircleClk(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 1] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -338,7 +332,7 @@ class DlyHalfCircleCClk(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -408,7 +402,7 @@ class DlyHalfCircleCClk(env.Environment):
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 9)[:-1]
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
         rotated_points = th.zeros(size=(batch_size, int(1 / self.dt), 2))
         # Might be slow because I have to loop through everything
         if reach_conds is None:
@@ -427,6 +421,7 @@ class DlyHalfCircleCClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
+        self.vis_inp = self.traj[:, -1, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -435,10 +430,6 @@ class DlyHalfCircleCClk(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 2] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -477,7 +468,7 @@ class DlySinusoid(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -544,10 +535,12 @@ class DlySinusoid(env.Environment):
         x_points = th.linspace(0, 1, 100)
         y_points = th.sin(th.linspace(0, 2*np.pi, 100))
         # Compute (x, y) coordinates for each angle
-        points = th.stack([x_points, y_points], dim=1) * 0.25
+        # Circle y is scaled by 0.25 and 0.5 (this is so that the x coordinate has a length of 0.25, but this looks good)
+        # Due to this, additionally scale only the y component of the sinusoid by 0.5 to get it in a better range
+        points = th.stack([x_points, y_points], dim=1) * 0.25 * th.tensor([1, 0.5])
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 9)[:-1]
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
         rotated_points = th.zeros(size=(batch_size, int(1 / self.dt), 2))
         # Might be slow because I have to loop through everything
         if reach_conds is None:
@@ -566,6 +559,7 @@ class DlySinusoid(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
+        self.vis_inp = self.traj[:, -1, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -574,10 +568,6 @@ class DlySinusoid(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 3] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -616,7 +606,7 @@ class DlySinusoidInv(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -683,10 +673,10 @@ class DlySinusoidInv(env.Environment):
         x_points = th.linspace(0, 1, 100)
         y_points = -th.sin(th.linspace(0, 2*np.pi, 100))
         # Compute (x, y) coordinates for each angle
-        points = th.stack([x_points, y_points], dim=1) * 0.25
+        points = th.stack([x_points, y_points], dim=1) * 0.25 * th.tensor([1, 0.5])
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 9)[:-1]
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
         rotated_points = th.zeros(size=(batch_size, int(1 / self.dt), 2))
         # Might be slow because I have to loop through everything
         if reach_conds is None:
@@ -705,6 +695,7 @@ class DlySinusoidInv(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
+        self.vis_inp = self.traj[:, -1, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -713,10 +704,6 @@ class DlySinusoidInv(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 4] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -755,7 +742,7 @@ class DlyFullReach(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -820,7 +807,7 @@ class DlyFullReach(env.Environment):
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
         # Generate 8 equally spaced angles
-        angles = th.linspace(0, 2 * np.pi, 9)[:-1]
+        angles = th.linspace(0, 2 * np.pi, 33)[:-1]
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in angles], dim=0)
         # this wont work yet cause everything else has shape batch_size (or I can assert reach_conds and batch_size are same shape)
@@ -831,6 +818,7 @@ class DlyFullReach(env.Environment):
             point_idx = reach_conds
 
         goal = points[point_idx] * 0.25 + fingertip
+        self.vis_inp = goal.clone()
 
         # Draw a line from fingertip to goal 
         x_points_ext = fingertip[:, None, 0] + th.linspace(0, 1, steps=100).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0]) 
@@ -853,10 +841,6 @@ class DlyFullReach(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 5] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -895,7 +879,7 @@ class DlyFullCircleClk(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -965,7 +949,7 @@ class DlyFullCircleClk(env.Environment):
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 9)[:-1]
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
         rotated_points = th.zeros(size=(batch_size, int(2 / self.dt), 2))
         # Might be slow because I have to loop through everything
         if reach_conds is None:
@@ -984,6 +968,7 @@ class DlyFullCircleClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
+        self.vis_inp = self.traj[:, 100, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -992,10 +977,6 @@ class DlyFullCircleClk(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 6] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -1034,7 +1015,7 @@ class DlyFullCircleCClk(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -1104,7 +1085,7 @@ class DlyFullCircleCClk(env.Environment):
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 9)[:-1]
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
         rotated_points = th.zeros(size=(batch_size, int(2 / self.dt), 2))
         # Might be slow because I have to loop through everything
         if reach_conds is None:
@@ -1123,6 +1104,7 @@ class DlyFullCircleCClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
+        self.vis_inp = self.traj[:, 100, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -1131,10 +1113,6 @@ class DlyFullCircleCClk(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 7] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -1173,7 +1151,7 @@ class DlyFigure8(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -1245,13 +1223,13 @@ class DlyFigure8(env.Environment):
         y_points_back = -th.sin(th.linspace(2*np.pi, 0, 100))
 
         # Compute (x, y) coordinates for each angle
-        points_forward = th.stack([x_points_forward, y_points_forward], dim=1) * 0.25
-        points_back = th.stack([x_points_back, y_points_back], dim=1) * 0.25
+        points_forward = th.stack([x_points_forward, y_points_forward], dim=1) * 0.25 * th.tensor([1, 0.5])
+        points_back = th.stack([x_points_back, y_points_back], dim=1) * 0.25 * th.tensor([1, 0.5])
 
         points = th.cat([points_forward, points_back], dim=0)
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 9)[:-1]
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
         rotated_points = th.zeros(size=(batch_size, int(2 / self.dt), 2))
         # Might be slow because I have to loop through everything
         if reach_conds is None:
@@ -1270,6 +1248,7 @@ class DlyFigure8(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
+        self.vis_inp = self.traj[:, 100, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -1278,10 +1257,6 @@ class DlyFigure8(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 8] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -1319,7 +1294,7 @@ class DlyFigure8Inv(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.go_cue[:, t].unsqueeze(1),
-        self.dir_input,
+        self.vis_inp,
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -1391,13 +1366,13 @@ class DlyFigure8Inv(env.Environment):
         y_points_back = th.sin(th.linspace(2*np.pi, 0, 100))
 
         # Compute (x, y) coordinates for each angle
-        points_forward = th.stack([x_points_forward, y_points_forward], dim=1) * 0.25
-        points_back = th.stack([x_points_back, y_points_back], dim=1) * 0.25
+        points_forward = th.stack([x_points_forward, y_points_forward], dim=1) * 0.25 * th.tensor([1, 0.5])
+        points_back = th.stack([x_points_back, y_points_back], dim=1) * 0.25 * th.tensor([1, 0.5])
 
         points = th.cat([points_forward, points_back], dim=0)
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 9)[:-1]
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
         rotated_points = th.zeros(size=(batch_size, int(2 / self.dt), 2))
         # Might be slow because I have to loop through everything
         if reach_conds is None:
@@ -1416,6 +1391,7 @@ class DlyFigure8Inv(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
+        self.vis_inp = self.traj[:, 100, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -1424,10 +1400,6 @@ class DlyFigure8Inv(env.Environment):
             size=(batch_size, 10)
         )
         self.rule_input[:, 9] = 1
-
-        # Lastly, a one hot encoding of the direction
-        dir_encoding = th.eye(8)
-        self.dir_input = dir_encoding[point_idx]
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 

@@ -1,4 +1,4 @@
-model_name=rnn512_softplus
-experiment=plot_variance_by_epoch
+model_name=rnn256_softplus 
+experiment=train_gru512
 
 

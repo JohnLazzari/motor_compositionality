@@ -97,16 +97,16 @@ class GRUPolicy(nn.Module):
 
         self.gru = nn.GRU(inp_size, hid_size, batch_first=batch_first)
 
-        self.fc = torch.nn.Linear(self.mrnn.total_num_units, output_dim)
+        self.fc = torch.nn.Linear(hid_size, output_dim)
         self.sigmoid = torch.nn.Sigmoid()
 
         self.to(device)
 
     def forward(self, h, obs):
         # Forward pass through mRNN
-        x, h = self.mrnn(obs[:, None, :], h)
+        hs, h = self.gru(obs[:, None, :], h[None, :, :])
         # Squeeze in the time dimension (doing timesteps one by one)
-        h = h.squeeze(1)
+        hs = hs.squeeze(1)
         # Motor output
-        u = self.sigmoid(self.fc(h)).squeeze(dim=1)
-        return x, h, u
+        u = self.sigmoid(self.fc(hs)).squeeze(dim=1)
+        return None, hs, u
