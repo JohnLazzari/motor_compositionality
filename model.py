@@ -72,7 +72,7 @@ class RNNPolicy(nn.Module):
 
     def forward(self, h, obs, *args, noise=True):
         # Forward pass through mRNN
-        x, h = self.mrnn(h, obs[:, None, :], *args, noise=noise)
+        x, h = self.mrnn(obs[:, None, :], h, *args, noise=noise)
         # Squeeze in the time dimension (doing timesteps one by one)
         h = h.squeeze(1)
         # Motor output

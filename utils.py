@@ -1,6 +1,7 @@
 import json
 import os
 import matplotlib.pyplot as plt
+import pickle
 
 def save_hp(hp, model_dir):
     """Save the hyper-parameter file of model save_name"""
@@ -9,11 +10,9 @@ def save_hp(hp, model_dir):
         json.dump(hp_copy, f)
 
 def create_dir(save_path):
-    # Get the directory part of the save path
-    directory = os.path.dirname(save_path)
     # Check if the directory exists, and create it if it doesn't
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
 
 def load_hp(model_dir):
     """Load the hyper-parameter file of model save_name"""
@@ -24,10 +23,23 @@ def load_hp(model_dir):
 
 def save_fig(save_path, eps=False):
     # Simple function to save figure while creating dir and closing
-    create_dir(save_path)
+    dir = os.path.dirname(save_path)
+    create_dir(dir)
     plt.tight_layout()
     if eps:
         plt.savefig(save_path, format="eps")
     else:
         plt.savefig(save_path)
     plt.close()
+
+def load_pickle(file):
+    try:
+        with open(file, 'rb') as f:
+            data = pickle.load(f)
+    except UnicodeDecodeError as e:
+        with open(file, 'rb') as f:
+            data = pickle.load(f, encoding='latin1')
+    except Exception as e:
+        print('Unable to load data ', file, ':', e)
+        raise
+    return data
