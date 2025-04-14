@@ -16,5 +16,5 @@ def l1_rate(act, scale):
     return l1
 
 def l1_muscle_act(act, scale):
-    l1 = scale * torch.mean(torch.sum(torch.abs(act), dim=(1, 2)))
+    l1 = scale * torch.mean(torch.sum(torch.abs(act), dim=-1))
     return l1

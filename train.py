@@ -24,7 +24,7 @@ DEF_HP = {
     "t_const": 20,
     "lr": 0.001,
     "batch_size": 32,
-    "epochs": 100_000,
+    "epochs": 50_000,
     "save_iter": 100,
     "l1_rate": 0.001,
     "l1_weight": 0.001,
