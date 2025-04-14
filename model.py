@@ -70,11 +70,12 @@ class RNNPolicy(nn.Module):
 
         self.to(device)
 
-    def forward(self, h, obs, *args, noise=True):
+    def forward(self, x, obs, *args, noise=True):
         # Forward pass through mRNN
-        x, h = self.mrnn(obs[:, None, :], h, *args, noise=noise)
+        x, h = self.mrnn(obs[:, None, :], x, *args, noise=noise)
         # Squeeze in the time dimension (doing timesteps one by one)
         h = h.squeeze(1)
+        x = x.squeeze(1)
         # Motor output
         u = self.sigmoid(self.fc(h)).squeeze(dim=1)
         return x, h, u

@@ -156,7 +156,7 @@ def _test(model_path, model_file, options, env):
     policy.load_state_dict(checkpoint['agent_state_dict'])
 
     # initialize batch
-    h = torch.zeros(size=(hp["batch_size"], policy.mrnn.total_num_units))
+    x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
     
     obs, info = env.reset(options=options)
     terminated = False
@@ -172,7 +172,7 @@ def _test(model_path, model_file, options, env):
     # simulate whole episode
     while not terminated:  # will run until `max_ep_duration` is reached
         with torch.no_grad():
-            x, h, action = policy(h, obs, noise=False)
+            x, h, action = policy(x, obs, noise=False)
             obs, reward, terminated, info = env.step(timesteps, action=action)
 
             trial_data["h"].append(h.unsqueeze(1))  # trajectories
@@ -307,7 +307,7 @@ def plot_task_kinematics(model_name):
 
     create_dir(exp_path)
 
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 8, 1)}
+    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
 
     for env in env_dict:
 
@@ -332,7 +332,7 @@ def variance_by_rule(model_name):
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
 
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 8, 1)}
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
 
     env_var_dict = {}
     var_list = []
@@ -366,7 +366,7 @@ def variance_by_epoch(model_name):
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
 
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 8, 1)}
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
 
     env_var_dict = {}
     var_list = []
@@ -386,7 +386,7 @@ def variance_by_epoch(model_name):
         var_list.extend([task_var_delay, task_var_mov])
         task_list.extend([f"{env}_delay", f"{env}_movement"])
 
-    env_var_dict["h_var_all"] = torch.stack(var_list, dim=1)
+    env_var_dict["h_var_all"] = torch.stack(var_list, dim=1).numpy()
     env_var_dict["keys"] = task_list
     
     save_name = 'variance_epoch'
@@ -401,7 +401,7 @@ def variance_by_epoch(model_name):
 def plot_variance_by_rule(model_name):
     # Get selectivity and clusters for different movements
     model_path = f"checkpoints/{model_name}"
-    exp_path = f"results/{model_name}/variance/variance.png"
+    exp_path = f"results/{model_name}/variance/variance_rule.png"
     
     clustering = Analysis(model_path, "rule")
     clustering.plot_variance(exp_path)
@@ -412,7 +412,7 @@ def plot_variance_by_rule(model_name):
 def plot_variance_by_epoch(model_name):
     # Get selectivity and clusters for different movements
     model_path = f"checkpoints/{model_name}"
-    exp_path = f"results/{model_name}/variance/variance.png"
+    exp_path = f"results/{model_name}/variance/variance_epoch.png"
     
     clustering = Analysis(model_path, "epoch")
     clustering.plot_variance(exp_path)

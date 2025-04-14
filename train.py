@@ -28,7 +28,7 @@ DEF_HP = {
     "save_iter": 100,
     "l1_rate": 0.001,
     "l1_weight": 0.001,
-    "l1_muscle_act": 0.001
+    "l1_muscle_act": 0.01
 }
 
 def train_2link(model_path, model_file, hp=None):
@@ -87,6 +87,7 @@ def train_2link(model_path, model_file, hp=None):
     for batch in range(hp["epochs"]):
 
         # initialize batch
+        x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
         h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
 
         rand_env = random.choices(env_list, probs)
@@ -107,7 +108,7 @@ def train_2link(model_path, model_file, hp=None):
         while not terminated:  # will run until `max_ep_duration` is reached
             timestep += 1
 
-            x, h, action = policy(h, obs)
+            x, h, action = policy(x, obs)
             obs, reward, terminated, info = env.step(timestep, action=action)
 
             xy.append(info["states"]["fingertip"][:, None, :])  # trajectories
