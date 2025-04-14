@@ -54,9 +54,9 @@ class RNNPolicy(nn.Module):
         )
 
         # Add Region
-        self.mrnn.add_recurrent_region("region", hid_size, learnable_bias=True)
+        self.mrnn.add_recurrent_region("region", hid_size, learnable_bias=True, device=device)
         # Add Input
-        self.mrnn.add_input_region("input", inp_size)
+        self.mrnn.add_input_region("input", inp_size, device=device)
 
         # Add connections
         self.mrnn.add_recurrent_connection("region", "region")
