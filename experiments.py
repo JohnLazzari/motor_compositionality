@@ -14,6 +14,8 @@ import pickle
 from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
 import analysis.plot_utils as plot_utils
 import tqdm as tqdm
+import itertools
+from sklearn.decomposition import PCA
 
 env_dict = {
     "DlyHalfReach": DlyHalfReach, 
@@ -165,6 +167,7 @@ def _test(model_path, model_file, options, env):
 
     trial_data["h"] = []
     trial_data["action"] = []
+    trial_data["muscle_acts"] = []
     trial_data["obs"] = []
     trial_data["xy"] = []
     trial_data["tg"] = []
@@ -180,6 +183,7 @@ def _test(model_path, model_file, options, env):
             trial_data["obs"].append(obs.unsqueeze(1))  # targets
             trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
             trial_data["tg"].append(info["goal"][:, None, :])  # targets
+            trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
 
             timesteps += 1
 
@@ -559,24 +563,99 @@ def plot_fps(model_name):
 
 
 
-def principle_angles(model_name):
+def neural_principle_angles(model_name):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
-    exp_path = f"results/{model_name}/pc_angles"
+    exp_path = f"results/{model_name}/pc_angles/neural_angles.png"
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 8, 1)}
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
 
     trial_data_envs = {}
     for env in env_dict:
 
         trial_data = _test(model_path, model_file, options, env=env_dict[env])
-        trial_data_envs[env] = trial_data
+        trial_data_envs[env] = trial_data["h"]
 
+    # Get all unique pairs of unit activity across tasks
+    combinations = list(itertools.combinations(trial_data_envs, 2))
+    angles_dict = {}
+    for combination in combinations:
+        
+        pca1 = PCA()
+        pca2 = PCA()
+
+        trial1_data = trial_data_envs[combination[0]].reshape((-1, trial_data_envs[combination[0]].shape[-1]))
+        trial2_data = trial_data_envs[combination[1]].reshape((-1, trial_data_envs[combination[1]].shape[-1]))
+
+        pca1.fit(trial1_data)
+        pca2.fit(trial2_data)
+
+        pca1_comps = pca1.components_[:12]
+        pca2_comps = pca2.components_[:12]
+
+        inner_prod_mat = pca1_comps @ pca2_comps.T # Should be m x m
+        U, s, Vh = np.linalg.svd(inner_prod_mat)
+        angles = np.degrees(np.arccos(s))
+
+        angles_dict[combination] = angles
     
+    for angles in angles_dict:
+        plt.plot(angles_dict[angles], label=angles)
+    save_fig(exp_path)
+
+
+
+
+def muscle_principle_angles(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/pc_angles/muscle_angles.png"
+
+    # Get variance of units across tasks and save to pickle file in model directory
+    # Doing so across rules only
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
+
+    trial_data_envs = {}
+    for env in env_dict:
+
+        trial_data = _test(model_path, model_file, options, env=env_dict[env])
+        trial_data_envs[env] = trial_data["muscle_acts"]
+
+    # Get all unique pairs of unit activity across tasks
+    combinations = list(itertools.combinations(trial_data_envs, 2))
+    angles_dict = {}
+    for combination in combinations:
+        
+        pca1 = PCA()
+        pca2 = PCA()
+
+        trial1_data = trial_data_envs[combination[0]].reshape((-1, trial_data_envs[combination[0]].shape[-1]))
+        trial2_data = trial_data_envs[combination[1]].reshape((-1, trial_data_envs[combination[1]].shape[-1]))
+
+        pca1.fit(trial1_data)
+        pca2.fit(trial2_data)
+
+        pca1_comps = pca1.components_[:3]
+        pca2_comps = pca2.components_[:3]
+
+        inner_prod_mat = pca1_comps @ pca2_comps.T # Should be m x m
+        U, s, Vh = np.linalg.svd(inner_prod_mat)
+        angles = np.degrees(np.arccos(s))
+
+        angles_dict[combination] = angles
     
+    for angles in angles_dict:
+        plt.plot(angles_dict[angles], label=angles)
+    save_fig(exp_path)
+
+
+
+
+
 if __name__ == "__main__":
 
     ### PARAMETERS ###
@@ -627,3 +706,7 @@ if __name__ == "__main__":
         compute_fps(args.model_name) 
     elif args.experiment == "plot_fps":
         plot_fps(args.model_name) 
+    elif args.experiment == "neural_principle_angles":
+        neural_principle_angles(args.model_name) 
+    elif args.experiment == "muscle_principle_angles":
+        muscle_principle_angles(args.model_name) 

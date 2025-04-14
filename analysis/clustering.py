@@ -73,7 +73,7 @@ class Analysis(object):
         from sklearn.cluster import AgglomerativeClustering, KMeans
 
         # Choose number of clusters that maximize silhouette score
-        n_clusters = range(2, 20)
+        n_clusters = range(2, 30)
         scores = list()
         labels_list = list()
         for n_cluster in n_clusters:
@@ -97,8 +97,8 @@ class Analysis(object):
             i = np.argmax(scores)
         else:
             # The more rigorous method doesn't work well in this case
-            #i = n_clusters.index(10)
-            i = np.argmax(scores)
+            i = n_clusters.index(10)
+            #i = np.argmax(scores)
 
         labels = labels_list[i]
         n_cluster = n_clusters[i]
