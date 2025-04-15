@@ -3,6 +3,7 @@ import sys
 import torch
 import motornet as mn
 import random
+import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -14,7 +15,7 @@ from utils import save_hp, create_dir
 
 DEF_HP = {
     "network": "rnn",
-    "inp_size": 27,
+    "inp_size": 28,
     "hid_size": 512,
     "activation_name": "softplus",
     "noise_level_act": 0.1,
@@ -25,11 +26,86 @@ DEF_HP = {
     "lr": 0.001,
     "batch_size": 32,
     "epochs": 50_000,
-    "save_iter": 100,
+    "save_iter": 500,
     "l1_rate": 0.001,
     "l1_weight": 0.001,
     "l1_muscle_act": 0.01
 }
+
+def do_eval(policy, hp):
+
+    env_dict = {
+        "DlyHalfReach": DlyHalfReach, 
+        "DlyHalfCircleClk": DlyHalfCircleClk, 
+        "DlyHalfCircleCClk": DlyHalfCircleCClk, 
+        "DlySinusoid": DlySinusoid, 
+        "DlySinusoidInv": DlySinusoidInv,
+        "DlyFullReach": DlyFullReach,
+        "DlyFullCircleClk": DlyFullCircleClk,
+        "DlyFullCircleCClk": DlyFullCircleCClk,
+        "DlyFigure8": DlyFigure8,
+        "DlyFigure8Inv": DlyFigure8Inv
+    }
+
+    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+
+    # Currently 10 speed conds during testing, 3 for training
+    speed_conds = list(np.arange(0, 10))
+
+    total_test_loss = 0
+    condition_losses = {}
+    for env in env_dict:
+        condition_loss = 0
+        for speed in speed_conds:
+
+            # initialize batch
+            # use 32 to get every possible direction
+            x = torch.zeros(size=(32, hp["hid_size"]))
+            h = torch.zeros(size=(32, hp["hid_size"]))
+
+            cur_env = env_dict[env](effector=effector)
+
+            # Get first timestep
+            obs, info = cur_env.reset(testing=True, options={"batch_size": 32, "reach_conds": np.arange(0, 32), "speed_cond": speed})
+            terminated = False
+
+            # initial positions and targets
+            xy = [info["states"]["fingertip"][:, None, :]]
+            tg = [info["goal"][:, None, :]]
+
+            timestep = 0
+            # simulate whole episode
+            while not terminated:  # will run until `max_ep_duration` is reached
+                timestep += 1
+
+                with torch.no_grad():
+                    x, h, action = policy(x, obs)
+                    obs, reward, terminated, info = cur_env.step(timestep, action=action)
+
+                xy.append(info["states"]["fingertip"][:, None, :])  # trajectories
+                tg.append(info["goal"][:, None, :])  # targets
+
+            # concatenate into a (batch_size, n_timesteps, xy) tensor
+            xy = torch.cat(xy, axis=1)
+            tg = torch.cat(tg, axis=1)
+
+            # Implement loss function
+            loss = l1_dist(xy, tg)  # L1 loss on position
+            condition_loss += loss.item()
+        condition_loss /= len(speed_conds)
+        condition_losses[env] = condition_loss
+        total_test_loss += condition_loss
+    total_test_loss /= len(env_dict)
+
+    print("\n")
+    print("Eval Results:")
+    for env in condition_losses:
+        print(f"Total Loss for Environment {env}| {condition_losses[env]}")
+    print(f"Total Testing Loss: {total_test_loss}")
+    print("\n")
+    
+    return total_test_loss
+
 
 def train_2link(model_path, model_file, hp=None):
 
@@ -68,7 +144,8 @@ def train_2link(model_path, model_file, hp=None):
     optimizer = torch.optim.Adam(policy.parameters(), lr=hp["lr"])
 
     losses = []
-    interval = 10
+    interval = 100
+    best_test_loss = -np.inf
 
     env_list = [
         DlyHalfReach, 
@@ -139,10 +216,18 @@ def train_2link(model_path, model_file, hp=None):
         if (batch % interval == 0) and (batch != 0):
             print("Batch {}/{} Done, mean policy loss: {}".format(batch, hp["epochs"], sum(losses[-interval:])/interval))
 
-        if batch % hp["save_iter"] == 0:
-            torch.save({
-                'agent_state_dict': policy.state_dict(),
-            }, model_path + "/" + model_file)
+        if (batch % hp["save_iter"] == 0):
+            # Get test loss
+            test_loss = do_eval(policy, hp)
+            # If current test loss is better than previous, save model and update best loss
+            if test_loss >= best_test_loss:
+                best_test_loss = test_loss
+                torch.save({
+                    'agent_state_dict': policy.state_dict(),
+                }, model_path + "/" + model_file)
+                print("Model Saved!")
+                print(f"Directory: {model_path + "/" + model_file}")
+                print("\n")
 
 if __name__ == "__main__":
     pass

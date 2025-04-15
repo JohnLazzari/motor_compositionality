@@ -13,9 +13,11 @@ from analysis.clustering import Analysis
 import pickle
 from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
 import analysis.plot_utils as plot_utils
+#from analysis.dPCA import dPCA
 import tqdm as tqdm
 import itertools
 from sklearn.decomposition import PCA
+from losses import l1_dist
 
 env_dict = {
     "DlyHalfReach": DlyHalfReach, 
@@ -116,7 +118,7 @@ def train_gru1024():
 
 
 
-def _test(model_path, model_file, options, env):
+def _test(model_path, model_file, options, env, stim=None, feedback_mask=None):
     """ Function will save all relevant data from a test run of a given env
 
     Args:
@@ -160,7 +162,7 @@ def _test(model_path, model_file, options, env):
     # initialize batch
     x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
     
-    obs, info = env.reset(options=options)
+    obs, info = env.reset(testing=True, options=options)
     terminated = False
     trial_data = {}
     timesteps = 0
@@ -174,24 +176,70 @@ def _test(model_path, model_file, options, env):
 
     # simulate whole episode
     while not terminated:  # will run until `max_ep_duration` is reached
+
+        timesteps += 1
+        # Check if ablating feedback
+        if feedback_mask is not None:
+            obs = obs * feedback_mask
+
         with torch.no_grad():
-            x, h, action = policy(x, obs, noise=False)
+            # Check if silencing units 
+            if stim is not None:
+                x, h, action = policy(x, obs, stim, noise=False)
+            else:
+                x, h, action = policy(x, obs, noise=False)
+
+            # Take step in motornet environment
             obs, reward, terminated, info = env.step(timesteps, action=action)
 
-            trial_data["h"].append(h.unsqueeze(1))  # trajectories
-            trial_data["action"].append(action.unsqueeze(1))  # targets
-            trial_data["obs"].append(obs.unsqueeze(1))  # targets
-            trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
-            trial_data["tg"].append(info["goal"][:, None, :])  # targets
-            trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
+        # Save all information regarding episode step
+        trial_data["h"].append(h.unsqueeze(1))  # trajectories
+        trial_data["action"].append(action.unsqueeze(1))  # targets
+        trial_data["obs"].append(obs.unsqueeze(1))  # targets
+        trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
+        trial_data["tg"].append(info["goal"][:, None, :])  # targets
+        trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
 
-            timesteps += 1
-
+    # Concatenate all data into single tensor
     for key in trial_data:
         trial_data[key] = torch.cat(trial_data[key], dim=1)
     trial_data["delay_time"] = env.delay_time
 
     return trial_data
+
+
+
+
+def plot_psth(model_name):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
+
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/psth"
+
+    create_dir(exp_path)
+
+    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
+
+    for env in env_dict:
+
+        trial_data = _test(model_path, model_file, options, env=env_dict[env])
+    
+        # Get kinematics and activity in a center out setting
+        # On random and delay
+        colors = plt.cm.inferno(np.linspace(0, 1, trial_data["h"].shape[0])) 
+
+        for i, h in enumerate(trial_data["h"]):
+            plt.plot(torch.mean(h, dim=-1), color=colors[i], linewidth=4)
+            plt.axvline(trial_data["delay_time"], linestyle="dashed", color="grey")
+        save_fig(os.path.join(exp_path, f"{env}_tg_trajectory.png"))
 
 
 
@@ -208,25 +256,31 @@ def plot_task_trajectories(model_name):
     """
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
-    exp_path = f"results/{model_name}/trajectories"
+    exp_path = f"results/trajectories"
 
     create_dir(exp_path)
 
+    speed_conds = np.arange(0, 10)
     options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
 
     for env in env_dict:
+        for speed in speed_conds:
+            options["speed_cond"] = speed
 
-        trial_data = _test(model_path, model_file, options, env=env_dict[env])
-    
-        # Get kinematics and activity in a center out setting
-        # On random and delay
-        colors = plt.cm.inferno(np.linspace(0, 1, trial_data["tg"].shape[1])) 
+            effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+            cur_env = env_dict[env](effector=effector)
+            
+            obs, info = cur_env.reset(testing=True, options=options)
 
-        for i, tg in enumerate(trial_data["tg"]):
-            plt.scatter(tg[:, 0], tg[:, 1], s=10, color=colors)
-            plt.scatter(tg[0, 0], tg[0, 1], s=150, marker='x', color="black")
-            plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
-        save_fig(os.path.join(exp_path, f"{env}_tg_trajectory.png"))
+            # Get kinematics and activity in a center out setting
+            # On random and delay
+            colors = plt.cm.inferno(np.linspace(0, 1, cur_env.traj.shape[1])) 
+
+            for i, tg in enumerate(cur_env.traj):
+                plt.scatter(tg[:, 0], tg[:, 1], s=10, color=colors)
+                plt.scatter(tg[0, 0], tg[0, 1], s=150, marker='x', color="black")
+                plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
+            save_fig(os.path.join(exp_path, f"{env}_speed{speed}_tg_trajectory.png"))
 
 
 
@@ -254,8 +308,11 @@ def plot_task_inputs(model_name):
         trial_data = _test(model_path, model_file, options, env=env_dict[env])
     
         for i, inp in enumerate(trial_data["obs"]):
+
             fig, ax = plt.subplots(6, 1)
-            ax[0].imshow(inp[:, :10].T, cmap="seismic", aspect="auto")
+            fig.set_size_inches(4, 6)
+
+            ax[0].imshow(inp[:, :10].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             # Remove top and right only (common for minimalist style)
             ax[0].spines['top'].set_visible(False)
             ax[0].spines['right'].set_visible(False)
@@ -268,25 +325,25 @@ def plot_task_inputs(model_name):
             ax[1].spines['bottom'].set_visible(False)
             ax[1].set_xticks([])
 
-            ax[2].imshow(inp[:, 11:13].T, cmap="seismic", aspect="auto")
+            ax[2].imshow(inp[:, 11:13].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             ax[2].spines['top'].set_visible(False)
             ax[2].spines['right'].set_visible(False)
             ax[2].spines['bottom'].set_visible(False)
             ax[2].set_xticks([])
 
-            ax[3].imshow(inp[:, 13:15].T, cmap="seismic", aspect="auto")
+            ax[3].imshow(inp[:, 13:15].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             ax[3].spines['top'].set_visible(False)
             ax[3].spines['right'].set_visible(False)
             ax[3].spines['bottom'].set_visible(False)
             ax[3].set_xticks([])
 
-            ax[4].imshow(inp[:, 15:21].T, cmap="seismic", aspect="auto")
+            ax[4].imshow(inp[:, 15:21].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             ax[4].spines['top'].set_visible(False)
             ax[4].spines['right'].set_visible(False)
             ax[4].spines['bottom'].set_visible(False)
             ax[4].set_xticks([])
 
-            ax[5].imshow(inp[:, 21:27].T, cmap="seismic", aspect="auto")
+            ax[5].imshow(inp[:, 21:27].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             ax[5].spines['top'].set_visible(False)
             ax[5].spines['right'].set_visible(False)
             ax[5].spines['bottom'].set_visible(False)
@@ -405,10 +462,12 @@ def variance_by_epoch(model_name):
 def plot_variance_by_rule(model_name):
     # Get selectivity and clusters for different movements
     model_path = f"checkpoints/{model_name}"
-    exp_path = f"results/{model_name}/variance/variance_rule.png"
+    exp_path = f"results/{model_name}/variance"
     
     clustering = Analysis(model_path, "rule")
-    clustering.plot_variance(exp_path)
+    clustering.plot_variance(os.path.join(exp_path, "variance_rule.png"))
+    clustering.plot_cluster_score(os.path.join(exp_path, "cluster_score_rule.png"))
+    clustering.plot_2Dvisualization(os.path.join(exp_path, "clusters_rule.png"))
 
 
 
@@ -419,18 +478,9 @@ def plot_variance_by_epoch(model_name):
     exp_path = f"results/{model_name}/variance/variance_epoch.png"
     
     clustering = Analysis(model_path, "epoch")
-    clustering.plot_variance(exp_path)
-
-
-
-
-def plot_clusters(model_name):
-    # Get selectivity and clusters for different movements
-    model_path = f"checkpoints/{model_name}"
-    exp_path = f"results/{model_name}/clusters/clustering.png"
-
-    clustering = Analysis(model_path, "rule")
-    clustering.plot_2Dvisualization(exp_path)
+    clustering.plot_variance(os.path.join(exp_path, "variance_epoch.png"))
+    clustering.plot_cluster_score(os.path.join(exp_path, "cluster_score_epoch.png"))
+    clustering.plot_2Dvisualization(os.path.join(exp_path, "clusters_epoch.png"))
 
 
 
@@ -445,7 +495,7 @@ def compute_fps(model_name):
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 8, 1)}
+    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
 
     hp = load_hp(model_path)
     hp = hp.copy()
@@ -655,6 +705,118 @@ def muscle_principle_angles(model_name):
 
 
 
+def dpca(model_name):
+    pass
+
+
+
+
+def module_silencing(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/silencing/module_silencing.png"
+
+    hp = load_hp(model_path)
+    # Get variance of units across tasks and save to pickle file in model directory
+    # Doing so across rules only
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
+
+    clustering = Analysis(model_path, "rule")
+
+    n_cluster = clustering.n_cluster
+    change_loss_envs = torch.empty(size=(len(env_dict), n_cluster))
+    for i, env in enumerate(env_dict):
+        for cluster in range(n_cluster):
+
+            print(f"Silencing cluster {cluster} in environment {env}")
+            cur_cluster_indices = clustering.ind_active[clustering.labels == cluster]
+            silencing_mask = torch.zeros(size=(options["batch_size"], 1, hp["hid_size"]))
+            silencing_mask[..., cur_cluster_indices] = -10
+
+            # Control trial
+            trial_data_control = _test(model_path, model_file, options, env=env_dict[env])
+            control_loss = l1_dist(trial_data_control["xy"], trial_data_control["tg"])
+
+            trial_data_stim = _test(model_path, model_file, options, env=env_dict[env], stim=silencing_mask)
+            stim_loss = l1_dist(trial_data_stim["xy"], trial_data_stim["tg"])
+            
+            loss_change = control_loss.item() - stim_loss.item()
+            print(f"Change in loss: {loss_change}\n")
+            change_loss_envs[i, cluster] = loss_change
+
+    img = plt.imshow(change_loss_envs, vmin=-0.5, vmax=0.5, cmap="seismic")
+    plt.xticks(ticks=np.arange(0, n_cluster), labels=[f"cluster_{i}" for i in range(n_cluster)], rotation=45)
+    plt.yticks(ticks=np.arange(0, 10), labels=[env for env in env_dict], rotation=45)
+    cbar = plt.colorbar(img)
+    cbar.set_label('Change in Loss')
+    save_fig(exp_path)
+
+
+
+
+def feedback_ablation(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/silencing/feedback_silencing.png"
+
+    hp = load_hp(model_path)
+    # Get variance of units across tasks and save to pickle file in model directory
+    # Doing so across rules only
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
+
+    feedback_masks = {}
+    # Build masks for ablating input
+    rule_mask = torch.ones(size=(options["batch_size"], 27))
+    rule_mask[:10] = 0
+    feedback_masks["rule"] = rule_mask
+
+    go_mask = torch.ones(size=(options["batch_size"], 27))
+    go_mask[10:11] = 0
+    feedback_masks["go_cue"] = go_mask
+
+    tg_mask = torch.ones(size=(options["batch_size"], 27))
+    tg_mask[11:13] = 0
+    feedback_masks["vis_inp"] = tg_mask
+
+    fg_mask = torch.ones(size=(options["batch_size"], 27))
+    fg_mask[13:15] = 0
+    feedback_masks["vis_feedback"] = fg_mask
+
+    length_mask = torch.ones(size=(options["batch_size"], 27))
+    length_mask[15:21] = 0
+    feedback_masks["muscle_length"] = length_mask
+
+    vel_mask = torch.ones(size=(options["batch_size"], 27))
+    vel_mask[21:27] = 0
+    feedback_masks["muscle_vel"] = vel_mask
+
+    change_loss_envs = torch.empty(size=(len(env_dict), len(feedback_masks)))
+    for i, env in enumerate(env_dict):
+        for j, mask in enumerate(feedback_masks):
+
+            print(f"Ablating {mask} in env {env}")
+            # Control trial
+            trial_data_control = _test(model_path, model_file, options, env=env_dict[env])
+            control_loss = l1_dist(trial_data_control["xy"], trial_data_control["tg"])
+
+            trial_data_stim = _test(model_path, model_file, options, env=env_dict[env], feedback_mask=feedback_masks[mask])
+            stim_loss = l1_dist(trial_data_stim["xy"], trial_data_stim["tg"])
+            
+            loss_change = control_loss.item() - stim_loss.item()
+            print(f"Change in loss: {loss_change}\n")
+            change_loss_envs[i, j] = loss_change
+
+    img = plt.imshow(change_loss_envs, vmin=-0.5, vmax=0.5, cmap="seismic")
+    plt.xticks(ticks=np.arange(0, 6), labels=[mask for mask in feedback_masks], rotation=45)
+    plt.yticks(ticks=np.arange(0, 10), labels=[env for env in env_dict], rotation=45)
+    cbar = plt.colorbar(img)
+    cbar.set_label('Change in Loss')
+    save_fig(exp_path)
+
+
+
 
 if __name__ == "__main__":
 
@@ -686,6 +848,8 @@ if __name__ == "__main__":
         train_gru512() 
     elif args.experiment == "train_gru1024":
         train_gru1024() 
+    elif args.experiment == "plot_psth":
+        plot_psth(args.model_name) 
     elif args.experiment == "plot_task_trajectories":
         plot_task_trajectories(args.model_name) 
     elif args.experiment == "plot_task_inputs":
@@ -700,8 +864,6 @@ if __name__ == "__main__":
         plot_variance_by_rule(args.model_name) 
     elif args.experiment == "plot_variance_by_epoch":
         plot_variance_by_epoch(args.model_name) 
-    elif args.experiment == "plot_clusters":
-        plot_clusters(args.model_name) 
     elif args.experiment == "compute_fps":
         compute_fps(args.model_name) 
     elif args.experiment == "plot_fps":
@@ -710,3 +872,7 @@ if __name__ == "__main__":
         neural_principle_angles(args.model_name) 
     elif args.experiment == "muscle_principle_angles":
         muscle_principle_angles(args.model_name) 
+    elif args.experiment == "module_silencing":
+        module_silencing(args.model_name) 
+    elif args.experiment == "feedback_ablation":
+        feedback_ablation(args.model_name) 

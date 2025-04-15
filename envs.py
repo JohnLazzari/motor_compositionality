@@ -40,6 +40,7 @@ class DlyHalfReach(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -102,7 +103,7 @@ class DlyHalfReach(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
         """
         Uses the :meth:`Environment.reset()` method of the parent class :class:`Environment` that can be overwritten to 
         change the returned data. Here the goals (`i.e.`, the targets) are drawn from a random uniform distribution across
@@ -113,6 +114,7 @@ class DlyHalfReach(env.Environment):
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -124,19 +126,34 @@ class DlyHalfReach(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, 100))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
+
         # Generate 8 equally spaced angles
-        angles = th.linspace(0, 2 * np.pi, 33)[:-1]
+        angles = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in angles], dim=0)
+
         # this wont work yet cause everything else has shape batch_size (or I can assert reach_conds and batch_size are same shape)
         if reach_conds is None:
             point_idx = th.randint(0, points.size(0), (batch_size,))
@@ -148,8 +165,8 @@ class DlyHalfReach(env.Environment):
         self.vis_inp = goal.clone()
 
         # Draw a line from fingertip to goal 
-        x_points = fingertip[:, None, 0] + th.linspace(0, 1, steps=100).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0]) 
-        y_points = fingertip[:, None, 1] + th.linspace(0, 1, steps=100).repeat(batch_size, 1) * (goal[:, None, 1] - fingertip[:, None, 1]) 
+        x_points = fingertip[:, None, 0] + th.linspace(0, 1, steps=self.movement_time).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0]) 
+        y_points = fingertip[:, None, 1] + th.linspace(0, 1, steps=self.movement_time).repeat(batch_size, 1) * (goal[:, None, 1] - fingertip[:, None, 1]) 
 
         self.traj = th.stack([x_points, y_points], dim=-1)
         self.initial_pos = self.states["fingertip"].clone()
@@ -196,6 +213,7 @@ class DlyHalfCircleClk(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -234,12 +252,14 @@ class DlyHalfCircleClk(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -251,29 +271,44 @@ class DlyHalfCircleClk(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(1 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
-        traj_points = th.linspace(np.pi, 0, 100)
+        traj_points = th.linspace(np.pi, 0, self.movement_time)
+
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in traj_points], dim=0)
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
-        rotated_points = th.zeros(size=(batch_size, int(1 / self.dt), 2))
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+        rotated_points = th.zeros(size=(batch_size, self.movement_time, 2))
+
         # Might be slow because I have to loop through everything
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
             point_idx = reach_conds
+
+        # Rotate the points based on the chosen angles
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
             cos_theta = np.cos(theta)
@@ -284,6 +319,7 @@ class DlyHalfCircleClk(env.Environment):
             rotated_traj = (R @ points.T).T
             rotated_points[i] = rotated_traj
         
+        # Create full trajectory (center at fingertip)
         self.traj = rotated_points + fingertip[:, None, :]
         self.vis_inp = self.traj[:, -1, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
@@ -331,6 +367,7 @@ class DlyHalfCircleCClk(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -369,13 +406,14 @@ class DlyHalfCircleCClk(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -387,29 +425,43 @@ class DlyHalfCircleCClk(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(1 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
-        traj_points = th.linspace(np.pi, 2*np.pi, 100)
+        traj_points = th.linspace(np.pi, 2*np.pi, self.movement_time)
+
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in traj_points], dim=0)
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
-        rotated_points = th.zeros(size=(batch_size, int(1 / self.dt), 2))
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+        rotated_points = th.zeros(size=(batch_size, self.movement_time, 2))
+
         # Might be slow because I have to loop through everything
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
             point_idx = reach_conds
+
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
             cos_theta = np.cos(theta)
@@ -467,6 +519,7 @@ class DlySinusoid(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -505,13 +558,14 @@ class DlySinusoid(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -523,31 +577,45 @@ class DlySinusoid(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(1 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
-        x_points = th.linspace(0, 1, 100)
-        y_points = th.sin(th.linspace(0, 2*np.pi, 100))
+        x_points = th.linspace(0, 1, self.movement_time)
+        y_points = th.sin(th.linspace(0, 2*np.pi, self.movement_time))
+
         # Compute (x, y) coordinates for each angle
         # Circle y is scaled by 0.25 and 0.5 (this is so that the x coordinate has a length of 0.25, but this looks good)
         # Due to this, additionally scale only the y component of the sinusoid by 0.5 to get it in a better range
         points = th.stack([x_points, y_points], dim=1) * 0.25 * th.tensor([1, 0.5])
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
-        rotated_points = th.zeros(size=(batch_size, int(1 / self.dt), 2))
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+        rotated_points = th.zeros(size=(batch_size, self.movement_time, 2))
+
         # Might be slow because I have to loop through everything
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
             point_idx = reach_conds
+
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
             cos_theta = np.cos(theta)
@@ -605,6 +673,7 @@ class DlySinusoidInv(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -643,13 +712,14 @@ class DlySinusoidInv(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -661,29 +731,43 @@ class DlySinusoidInv(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(1 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
-        x_points = th.linspace(0, 1, 100)
-        y_points = -th.sin(th.linspace(0, 2*np.pi, 100))
+        x_points = th.linspace(0, 1, self.movement_time)
+        y_points = -th.sin(th.linspace(0, 2*np.pi, self.movement_time))
+
         # Compute (x, y) coordinates for each angle
         points = th.stack([x_points, y_points], dim=1) * 0.25 * th.tensor([1, 0.5])
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
-        rotated_points = th.zeros(size=(batch_size, int(1 / self.dt), 2))
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+        rotated_points = th.zeros(size=(batch_size, self.movement_time, 2))
+
         # Might be slow because I have to loop through everything
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
             point_idx = reach_conds
+
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
             cos_theta = np.cos(theta)
@@ -741,6 +825,7 @@ class DlyFullReach(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -779,13 +864,14 @@ class DlyFullReach(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -797,19 +883,34 @@ class DlyFullReach(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.half_movement_time = int(self.movement_time/2)
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size ,1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(2 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
+
         # Generate 8 equally spaced angles
-        angles = th.linspace(0, 2 * np.pi, 33)[:-1]
+        angles = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in angles], dim=0)
+
         # this wont work yet cause everything else has shape batch_size (or I can assert reach_conds and batch_size are same shape)
         if reach_conds is None:
             point_idx = th.randint(0, points.size(0), (batch_size,))
@@ -821,12 +922,12 @@ class DlyFullReach(env.Environment):
         self.vis_inp = goal.clone()
 
         # Draw a line from fingertip to goal 
-        x_points_ext = fingertip[:, None, 0] + th.linspace(0, 1, steps=100).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0]) 
-        y_points_ext = fingertip[:, None, 1] + th.linspace(0, 1, steps=100).repeat(batch_size, 1) * (goal[:, None, 1] - fingertip[:, None, 1]) 
+        x_points_ext = fingertip[:, None, 0] + th.linspace(0, 1, steps=self.half_movement_time).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0]) 
+        y_points_ext = fingertip[:, None, 1] + th.linspace(0, 1, steps=self.half_movement_time).repeat(batch_size, 1) * (goal[:, None, 1] - fingertip[:, None, 1]) 
 
         # Draw a line from goal to fingertip
-        x_points_ret = goal[:, None, 0] + th.linspace(0, 1, steps=100).repeat(batch_size, 1) * (fingertip[:, None, 0] - goal[:, None, 0]) 
-        y_points_ret = goal[:, None, 1] + th.linspace(0, 1, steps=100).repeat(batch_size, 1) * (fingertip[:, None, 1] - goal[:, None, 1]) 
+        x_points_ret = goal[:, None, 0] + th.linspace(0, 1, steps=self.half_movement_time).repeat(batch_size, 1) * (fingertip[:, None, 0] - goal[:, None, 0]) 
+        y_points_ret = goal[:, None, 1] + th.linspace(0, 1, steps=self.half_movement_time).repeat(batch_size, 1) * (fingertip[:, None, 1] - goal[:, None, 1]) 
 
         # Concatenate reaching forward then backward along time axis
         forward_traj = th.stack([x_points_ext, y_points_ext], dim=-1)
@@ -878,6 +979,7 @@ class DlyFullCircleClk(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -916,13 +1018,14 @@ class DlyFullCircleClk(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -934,29 +1037,44 @@ class DlyFullCircleClk(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.half_movement_time = int(self.movement_time/2)
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(2 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
-        traj_points = th.linspace(np.pi, -np.pi, 200)
+        traj_points = th.linspace(np.pi, -np.pi, self.movement_time)
+
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in traj_points], dim=0)
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
-        rotated_points = th.zeros(size=(batch_size, int(2 / self.dt), 2))
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+        rotated_points = th.zeros(size=(batch_size, self.movement_time, 2))
+
         # Might be slow because I have to loop through everything
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
             point_idx = reach_conds
+
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
             cos_theta = np.cos(theta)
@@ -968,7 +1086,7 @@ class DlyFullCircleClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, 100, :].clone()
+        self.vis_inp = self.traj[:, self.half_movement_time, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -1014,6 +1132,7 @@ class DlyFullCircleCClk(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -1052,13 +1171,14 @@ class DlyFullCircleCClk(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -1070,29 +1190,44 @@ class DlyFullCircleCClk(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.half_movement_time = int(self.movement_time/2)
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(2 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
-        traj_points = th.linspace(np.pi, 3*np.pi, 200)
+        traj_points = th.linspace(np.pi, 3*np.pi, self.movement_time)
+
         # Compute (x, y) coordinates for each angle
         points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in traj_points], dim=0)
         points = (points + th.tensor([[1, 0]])) * 0.25 * 0.5
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
-        rotated_points = th.zeros(size=(batch_size, int(2 / self.dt), 2))
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+        rotated_points = th.zeros(size=(batch_size, self.movement_time, 2))
+
         # Might be slow because I have to loop through everything
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
             point_idx = reach_conds
+
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
             cos_theta = np.cos(theta)
@@ -1104,7 +1239,7 @@ class DlyFullCircleCClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, 100, :].clone()
+        self.vis_inp = self.traj[:, self.half_movement_time, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -1150,6 +1285,7 @@ class DlyFigure8(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -1188,13 +1324,14 @@ class DlyFigure8(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -1206,21 +1343,33 @@ class DlyFigure8(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.half_movement_time = int(self.movement_time/2)
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(2 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
 
-        x_points_forward = th.linspace(0, 1, 100)
-        y_points_forward = th.sin(th.linspace(0, 2*np.pi, 100))
+        x_points_forward = th.linspace(0, 1, self.half_movement_time)
+        y_points_forward = th.sin(th.linspace(0, 2*np.pi, self.half_movement_time))
 
-        x_points_back = th.linspace(1, 0, 100)
-        y_points_back = -th.sin(th.linspace(2*np.pi, 0, 100))
+        x_points_back = th.linspace(1, 0, self.half_movement_time)
+        y_points_back = -th.sin(th.linspace(2*np.pi, 0, self.half_movement_time))
 
         # Compute (x, y) coordinates for each angle
         points_forward = th.stack([x_points_forward, y_points_forward], dim=1) * 0.25 * th.tensor([1, 0.5])
@@ -1229,14 +1378,16 @@ class DlyFigure8(env.Environment):
         points = th.cat([points_forward, points_back], dim=0)
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
-        rotated_points = th.zeros(size=(batch_size, int(2 / self.dt), 2))
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+        rotated_points = th.zeros(size=(batch_size, self.movement_time, 2))
+
         # Might be slow because I have to loop through everything
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
             point_idx = reach_conds
+
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
             cos_theta = np.cos(theta)
@@ -1248,7 +1399,7 @@ class DlyFigure8(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, 100, :].clone()
+        self.vis_inp = self.traj[:, self.half_movement_time, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 
@@ -1293,6 +1444,7 @@ class DlyFigure8Inv(env.Environment):
 
         obs_as_list = [
         self.rule_input,
+        self.speed_scalar,
         self.go_cue[:, t].unsqueeze(1),
         self.vis_inp,
         self.obs_buffer["vision"][0],
@@ -1331,13 +1483,14 @@ class DlyFigure8Inv(env.Environment):
 
         return obs, reward, terminated, info
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
+        speed_cond = options.get('speed_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -1349,21 +1502,33 @@ class DlyFigure8Inv(env.Environment):
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
         delay_times = [50, 75, 100]
         self.delay_time = random.choice(delay_times)
+
+        # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
+        movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        self.half_movement_time = int(self.movement_time/2)
+        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
+
         self.go_cue = th.cat([
             th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, int(2 / self.dt)))
+            th.ones(size=(batch_size, self.movement_time))
         ], dim=-1)
+
         # Set duration
-        self.max_ep_duration = self.go_cue.shape[-1] - 1
+        self.max_ep_duration = self.delay_time + self.movement_time - 1
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
 
-        x_points_forward = th.linspace(0, 1, 100)
-        y_points_forward = -th.sin(th.linspace(0, 2*np.pi, 100))
+        x_points_forward = th.linspace(0, 1, self.half_movement_time)
+        y_points_forward = -th.sin(th.linspace(0, 2*np.pi, self.half_movement_time))
 
-        x_points_back = th.linspace(1, 0, 100)
-        y_points_back = th.sin(th.linspace(2*np.pi, 0, 100))
+        x_points_back = th.linspace(1, 0, self.half_movement_time)
+        y_points_back = th.sin(th.linspace(2*np.pi, 0, self.half_movement_time))
 
         # Compute (x, y) coordinates for each angle
         points_forward = th.stack([x_points_forward, y_points_forward], dim=1) * 0.25 * th.tensor([1, 0.5])
@@ -1372,14 +1537,16 @@ class DlyFigure8Inv(env.Environment):
         points = th.cat([points_forward, points_back], dim=0)
 
         # Generate 8 equally spaced angles
-        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1]
-        rotated_points = th.zeros(size=(batch_size, int(2 / self.dt), 2))
+        rot_angle = th.linspace(0, 2 * np.pi, 33)[:-1] if testing else th.linspace(0, 2 * np.pi, 9)[:-1]
+        rotated_points = th.zeros(size=(batch_size, self.movement_time, 2))
+
         # Might be slow because I have to loop through everything
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
             point_idx = reach_conds
+
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
             cos_theta = np.cos(theta)
@@ -1391,7 +1558,7 @@ class DlyFigure8Inv(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, 100, :].clone()
+        self.vis_inp = self.traj[:, self.half_movement_time, :].clone()
         self.initial_pos = self.states["fingertip"].clone()
         self.hidden_goal = self.initial_pos.clone()
 

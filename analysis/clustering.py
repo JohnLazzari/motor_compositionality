@@ -73,7 +73,7 @@ class Analysis(object):
         from sklearn.cluster import AgglomerativeClustering, KMeans
 
         # Choose number of clusters that maximize silhouette score
-        n_clusters = range(2, 30)
+        n_clusters = range(2, 20)
         scores = list()
         labels_list = list()
         for n_cluster in n_clusters:
@@ -138,7 +138,7 @@ class Analysis(object):
         self.hp = hp
         self.data_type = data_type
 
-    def plot_cluster_score(self, save_name=None):
+    def plot_cluster_score(self, save_name):
         """Plot the score by the number of clusters."""
         fig = plt.figure(figsize=(2, 2))
         ax = fig.add_axes([0.3, 0.3, 0.55, 0.55])
@@ -157,8 +157,8 @@ class Analysis(object):
             if save_name is None:
                 save_name = self.hp['activation']
             fig_name = fig_name + save_name
-            plt.savefig('figure/'+fig_name+'.pdf', transparent=True)
-        plt.show()
+            plt.savefig(save_name)
+            plt.close()
 
     def plot_variance(self, save_path):
         labels = self.labels
