@@ -3,7 +3,7 @@ import motornet as mn
 from model import RNNPolicy, GRUPolicy
 import torch
 import os
-from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial
+from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 import matplotlib.pyplot as plt
@@ -13,7 +13,9 @@ from analysis.clustering import Analysis
 import pickle
 from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
 import analysis.plot_utils as plot_utils
-#from analysis.dPCA import dPCA
+from analysis.manifold import principal_angles, vaf_ratio
+import dPCA
+from dPCA import dPCA
 import tqdm as tqdm
 import itertools
 from sklearn.decomposition import PCA
@@ -221,13 +223,12 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None):
     # Concatenate all data into single tensor
     for key in trial_data:
         trial_data[key] = torch.cat(trial_data[key], dim=1)
-    trial_data["delay_time"] = env.delay_time
+    trial_data["epoch_bounds"] = env.epoch_bounds
 
     return trial_data
 
 
 
-# TODO change for new setting with stable and hold epochs
 def plot_psth(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task
         This is not for kinematics
@@ -247,7 +248,7 @@ def plot_psth(model_name):
     for env in env_dict:
         for speed in range(10):
 
-            options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": speed, "delay_cond": 2}
+            options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": speed, "delay_cond": 1}
 
             trial_data = _test(model_path, model_file, options, env=env_dict[env])
         
@@ -255,15 +256,19 @@ def plot_psth(model_name):
             # On random and delay
             colors = plt.cm.inferno(np.linspace(0, 1, trial_data["h"].shape[0])) 
 
+            delay = trial_data["epoch_bounds"]["delay"][0]
+            mov = trial_data["epoch_bounds"]["movement"][0]
+            hold = trial_data["epoch_bounds"]["hold"][0]
+
             for i, h in enumerate(trial_data["h"]):
-                plt.plot(torch.mean(h, dim=-1), color=colors[i], linewidth=4)
-                plt.axvline(trial_data["delay_time"], linestyle="dashed", color="grey")
+                plt.plot(torch.mean(h, dim=-1)[delay:], color=colors[i], linewidth=4)
+                plt.axvline(mov-delay, linestyle="dashed", color="grey")
+                plt.axvline(hold-delay, linestyle="dashed", color="grey")
             save_fig(os.path.join(exp_path, f"{env}_speed{speed}_tg_trajectory.png"))
 
 
 
 
-# TODO change for new setting with stable and hold epochs
 def plot_pca(model_name):
 
     model_path = f"checkpoints/{model_name}"
@@ -276,6 +281,9 @@ def plot_pca(model_name):
     for env in env_dict:
 
         trial_data = _test(model_path, model_file, options, env=env_dict[env])
+
+        delay_start = trial_data["epoch_bounds"]["delay"][0]
+        movement_start = trial_data["epoch_bounds"]["movement"][0]
     
         # Get kinematics and activity in a center out setting
         # On random and delay
@@ -293,15 +301,15 @@ def plot_pca(model_name):
             # transform
             h_proj = pca_3d.transform(h)
             # Plot the 3D line
-            ax3d.plot(h_proj[25:trial_data['delay_time'], 0], h_proj[25:trial_data['delay_time'], 1], h_proj[25:trial_data['delay_time'], 2], color=colors[i], linewidth=4, linestyle="dashed")
-            ax3d.plot(h_proj[trial_data['delay_time']:, 0], h_proj[trial_data['delay_time']:, 1], h_proj[trial_data['delay_time']:, 2], color=colors[i], linewidth=4)
+            ax3d.plot(h_proj[delay_start:movement_start, 0], h_proj[delay_start:movement_start, 1], h_proj[delay_start:movement_start, 2], color=colors[i], linewidth=4, linestyle="dashed")
+            ax3d.plot(h_proj[movement_start:, 0], h_proj[movement_start:, 1], h_proj[movement_start:, 2], color=colors[i], linewidth=4)
             # Set labels for axes
             ax3d.set_xlabel('PC 1')
             ax3d.set_ylabel('PC 2')
             ax3d.set_zlabel('PC 3')
             ax3d.set_title(f'{env} PCs')
 
-            ax3d.scatter(h_proj[25, 0], h_proj[25, 1], h_proj[25, 2], marker="^", color=colors[i], s=250, zorder=10)
+            ax3d.scatter(h_proj[delay_start, 0], h_proj[delay_start, 1], h_proj[delay_start, 2], marker="^", color=colors[i], s=250, zorder=10)
             ax3d.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], marker="X", color=colors[i], s=250, zorder=10)
 
         save_fig(os.path.join(exp_path + "/3d", f"{env}_tg_trajectory.png"))
@@ -315,14 +323,14 @@ def plot_pca(model_name):
             # transform
             h_proj = pca_3d.transform(h)
             # Plot the 3D line
-            ax2d.plot(h_proj[25:trial_data['delay_time'], 0], h_proj[25:trial_data['delay_time'], 1], color=colors[i], linewidth=4, linestyle="dashed")
-            ax2d.plot(h_proj[trial_data['delay_time']:, 0], h_proj[trial_data['delay_time']:, 1], color=colors[i], linewidth=4)
+            ax2d.plot(h_proj[delay_start:movement_start, 0], h_proj[delay_start:movement_start, 1], color=colors[i], linewidth=4, linestyle="dashed")
+            ax2d.plot(h_proj[movement_start:, 0], h_proj[movement_start:, 1], color=colors[i], linewidth=4)
             # Set labels for axes
             ax2d.set_xlabel('PC 1')
             ax2d.set_ylabel('PC 2')
             ax2d.set_title(f'{env} PCs')
 
-            ax2d.scatter(h_proj[25, 0], h_proj[25, 1], marker="^", color=colors[i], s=250, zorder=10)
+            ax2d.scatter(h_proj[delay_start, 0], h_proj[delay_start, 1], marker="^", color=colors[i], s=250, zorder=10)
             ax2d.scatter(h_proj[-1, 0], h_proj[-1, 1], marker="X", color=colors[i], s=250, zorder=10)
 
         save_fig(os.path.join(exp_path + "/2d", f"{env}_tg_trajectory.png"))
@@ -454,7 +462,6 @@ def plot_task_input_output(model_name):
 
 
 
-# TODO change for new setting with stable and hold epochs
 def plot_task_feedback(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task
         This is not for kinematics
@@ -537,7 +544,6 @@ def plot_task_feedback(model_name):
 
 
 
-# TODO change for new setting with stable and hold epochs
 def plot_task_kinematics(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task
         This is not for kinematics
@@ -557,19 +563,30 @@ def plot_task_kinematics(model_name):
     for env in env_dict:
         for speed in range(10):
 
-            options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": speed}
+            options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": speed, "delay_cond": 1}
 
             trial_data = _test(model_path, model_file, options, env=env_dict[env])
         
             # Get kinematics and activity in a center out setting
             # On random and delay
-            colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[1])) 
+            colors_time = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[1])) 
+            colors_xy = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
 
             for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
-                plt.scatter(xy[:, 0], xy[:, 1], s=10, color=colors)
+                plt.scatter(xy[:, 0], xy[:, 1], s=10, color=colors_time)
                 plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color="black")
                 plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
-            save_fig(os.path.join(exp_path, f"{env}_speed{speed}_kinematics.png"))
+            save_fig(os.path.join(exp_path, "scatter", f"{env}_speed{speed}_kinematics.png"))
+
+            # Plot x coordinate only 
+            for i, xy in enumerate(trial_data["xy"]):
+                plt.plot(xy[:, 0], color=colors_xy[i])
+            save_fig(os.path.join(exp_path, "xpos", f"{env}_speed{speed}_xpos.png"))
+
+            # Plot y coordinate only 
+            for i, xy in enumerate(trial_data["xy"]):
+                plt.plot(xy[:, 1], color=colors_xy[i])
+            save_fig(os.path.join(exp_path, "ypos", f"{env}_speed{speed}_ypos.png"))
 
 
 
@@ -922,102 +939,171 @@ def plot_flow_fields(model_name):
 
 
 
-# TODO change for new setting with stable and hold epochs
-def neural_principle_angles(model_name):
+def _principal_angles(model_name, system, comparison):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
-    exp_path = f"results/{model_name}/pc_angles/neural_angles.png"
+    exp_path = f"results/{model_name}/pc_angles"
+    hp = load_hp(model_path)
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
     options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 0, "speed_cond": 5}
 
-    trial_data_envs = {}
-    for env in env_dict:
+    if system == "neural":
+        mode = "h"
+    elif sysetm == "muscle":
+        mode = "muscle_acts"
+    else:
+        raise ValueError("Not a valid system")
 
-        trial_data = _test(model_path, model_file, options, env=env_dict[env])
-        trial_data_envs[env] = trial_data["h"][:, trial_data["delay_time"]:]
+    if comparison == "task":
 
-    # Get all unique pairs of unit activity across tasks
-    combinations = list(itertools.combinations(trial_data_envs, 2))
-    angles_dict = {}
-    for combination in combinations:
-        
-        pca1 = PCA()
-        pca2 = PCA()
+        trial_data_envs = {}
+        for env in env_dict:
+            trial_data = _test(model_path, model_file, options, env=env_dict[env])
+            trial_data_envs[env] = trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:]
+        # Get all unique pairs of unit activity across tasks
+        combinations = list(itertools.combinations(trial_data_envs, 2))
 
-        trial1_data = trial_data_envs[combination[0]].reshape((-1, trial_data_envs[combination[0]].shape[-1]))
-        trial2_data = trial_data_envs[combination[1]].reshape((-1, trial_data_envs[combination[1]].shape[-1]))
+    elif comparison == "epoch":
 
-        pca1.fit(trial1_data)
-        pca2.fit(trial2_data)
+        combinations = []
+        for env in env_dict:
+            trial_data = _test(model_path, model_file, options, env=env_dict[env])
+            combinations.append((
+                trial_data["h"][:, :trial_data["epoch_bounds"]["delay"][0]], 
+                trial_data["h"][:, trial_data["epoch_bounds"]["delay"][0]:]
+            ))
 
-        pca1_comps = pca1.components_[:12]
-        pca2_comps = pca2.components_[:12]
-
-        inner_prod_mat = pca1_comps @ pca2_comps.T # Should be m x m
-        U, s, Vh = np.linalg.svd(inner_prod_mat)
-        angles = np.degrees(np.arccos(s))
-
-        angles_dict[combination] = angles
+    angles_dict = principal_angles(combinations)
     
     for angles in angles_dict:
         plt.plot(angles_dict[angles], label=angles)
-    save_fig(exp_path)
+    save_fig(os.path.join(exp_path, f"principal_angles.png"))
 
 
 
 
-# TODO change for new setting with stable and hold epochs
-def muscle_principle_angles(model_name):
+def _vaf_ratio(model_name, system, comparison):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
-    exp_path = f"results/{model_name}/pc_angles/muscle_angles.png"
+    exp_path = f"results/{model_name}/pc_angles"
+    hp = load_hp(model_path)
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
     options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 0, "speed_cond": 5}
 
-    trial_data_envs = {}
-    for env in env_dict:
+    if system == "neural":
+        mode = "h"
+    elif sysetm == "muscle":
+        mode = "muscle_acts"
+    else:
+        raise ValueError("Not a valid system")
 
-        trial_data = _test(model_path, model_file, options, env=env_dict[env])
-        trial_data_envs[env] = trial_data["muscle_acts"][:, trial_data["delay_time"]:]
+    if comparison == "task":
 
-    # Get all unique pairs of unit activity across tasks
-    combinations = list(itertools.combinations(trial_data_envs, 2))
-    angles_dict = {}
-    for combination in combinations:
-        
-        pca1 = PCA()
-        pca2 = PCA()
+        trial_data_envs = {}
+        for env in env_dict:
+            trial_data = _test(model_path, model_file, options, env=env_dict[env])
+            trial_data_envs[env] = trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:]
+        # Get all unique pairs of unit activity across tasks
+        combinations = list(itertools.combinations(trial_data_envs, 2))
 
-        trial1_data = trial_data_envs[combination[0]].reshape((-1, trial_data_envs[combination[0]].shape[-1]))
-        trial2_data = trial_data_envs[combination[1]].reshape((-1, trial_data_envs[combination[1]].shape[-1]))
+    elif comparison == "epoch":
 
-        pca1.fit(trial1_data)
-        pca2.fit(trial2_data)
+        combinations = []
+        for env in env_dict:
+            trial_data = _test(model_path, model_file, options, env=env_dict[env])
+            combinations.append((
+                trial_data["h"][:, :trial_data["epoch_bounds"]["delay"][0]], 
+                trial_data["h"][:, trial_data["epoch_bounds"]["delay"][0]:]
+            ))
 
-        pca1_comps = pca1.components_[:3]
-        pca2_comps = pca2.components_[:3]
-
-        inner_prod_mat = (pca1_comps @ pca2_comps.T).astype(np.float64) # Should be m x m
-        U, s, Vh = scipy.linalg.svd(inner_prod_mat)
-        angles = np.degrees(np.arccos(s))
-
-        angles_dict[combination] = angles
+    vaf_ratio_list, vaf_ratio_list_control = vaf_ratio(combinations)
     
-    for angles in angles_dict:
-        plt.plot(angles_dict[angles], label=angles)
-    save_fig(exp_path)
+    bins = np.linspace(0, 1, 50)
+    weights = np.ones_like(vaf_ratio_list) * 100 / len(vaf_ratio_list)
+    plt.hist(vaf_ratio_list, bins=bins, weights=weights, color="purple")
+    plt.hist(vaf_ratio_list_control, bins=bins, weights=weights, color="grey")
+    plt.xlim(0, 1)
+    save_fig(os.path.join(exp_path, "neural_vaf_ratio.png"))
 
 
 
 
-def dpca(model_name):
-    pass
+def neural_principal_angles_task(model_name):
+    _principal_angles(model_name, "neural", "task")
+def neural_principal_angles_epoch(model_name):
+    _principal_angles(model_name, "neural", "epoch")
+def muscle_principal_angles_epoch(model_name):
+    _principal_angles(model_name, "muscle", "task")
+def muscle_principal_angles_epoch(model_name):
+    _principal_angles(model_name, "muscle", "epoch")
+
+
+
+
+def neural_vaf_ratio_task(model_name):
+    _vaf_ratio(model_name, "neural", "task")
+def neural_vaf_ratio_epoch(model_name):
+    _vaf_ratio(model_name, "neural", "epoch")
+def muscle_vaf_ratio_epoch(model_name):
+    _vaf_ratio(model_name, "muscle", "task")
+def muscle_vaf_ratio_epoch(model_name):
+    _vaf_ratio(model_name, "muscle", "epoch")
+
+
+
+
+def plot_dpca(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/dpca"
+    hp = load_hp(model_path)
+
+    max_timesteps = 300
+
+    env_trials = torch.empty(size=(hp["hid_size"], 10, 10, 32, max_timesteps))
+    for i, env in enumerate(env_dict):
+        speed_trials = torch.empty(size=(hp["hid_size"], 10, 32, max_timesteps))
+        for speed in range(10):
+            options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 0, "speed_cond": speed}
+            trial_data = _test(model_path, model_file, options, env=env_dict[env])
+
+            interpolated_trials = torch.stack([interpolate_trial(h[trial_data["epoch_bounds"]["movement"][0]:], max_timesteps) for h in trial_data["h"]])
+            speed_trials[:, speed, ...] = interpolated_trials.permute(2, 0, 1)
+        env_trials[:, i, ...] = speed_trials
+    
+    # mean center
+    dpca = dPCA.dPCA(labels='esdt')
+    Z = dpca.fit_transform(env_trials.numpy())    
+
+    fig, ax = plt.subplots(1, 4)
+
+    print(Z['t'].shape)
+    print(Z['e'].shape)
+    print(Z['s'].shape)
+    print(Z['d'].shape)
+
+    for s in range(S):
+        plot(time,Z['t'][0,s])
+
+    title('1st time component')
+        
+    for s in range(S):
+        plot(time,Z['s'][0,s])
+        
+    title('1st stimulus component')
+        
+    for s in range(S):
+        plot(time,Z['st'][0,s])
+        
+    title('1st mixing component')
+    save_fig(os.path.join(exp_path, "dpcas.png"))
 
 
 
@@ -1202,3 +1288,5 @@ if __name__ == "__main__":
         feedback_ablation(args.model_name) 
     elif args.experiment == "plot_flow_fields":
         plot_flow_fields(args.model_name) 
+    elif args.experiment == "plot_dpca":
+        plot_dpca(args.model_name) 
