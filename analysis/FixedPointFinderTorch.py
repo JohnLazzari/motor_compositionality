@@ -134,7 +134,7 @@ class FixedPointFinderTorch(FixedPointFinderBase):
 
         while True:
             
-            F_x_bx1xd, F_x_1xbxd = self.rnn(inputs_bx1xd, x_1xbxd)
+            F_x_bx1xd, F_x_1xbxd = self.rnn(inputs_bx1xd, x_1xbxd, x_1xbxd)
             F_x_1xbxd = F_x_1xbxd.squeeze()
 
             dx_bxd = torch.squeeze(x_1xbxd - F_x_1xbxd)

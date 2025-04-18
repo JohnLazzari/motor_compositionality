@@ -41,8 +41,8 @@ class DlyHalfReach(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -93,7 +93,19 @@ class DlyHalfReach(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t < self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -109,23 +121,37 @@ class DlyHalfReach(env.Environment):
         change the returned data. Here the goals (`i.e.`, the targets) are drawn from a random uniform distribution across
         the full joint space.
         """
+
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
@@ -137,13 +163,38 @@ class DlyHalfReach(env.Environment):
 
         self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (NOT FEEDBACK)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 0] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
@@ -162,21 +213,27 @@ class DlyHalfReach(env.Environment):
             point_idx = reach_conds
 
         goal = points[point_idx] * 0.25 + fingertip
-        self.vis_inp = goal.clone()
 
         # Draw a line from fingertip to goal 
         x_points = fingertip[:, None, 0] + th.linspace(0, 1, steps=self.movement_time).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0]) 
         y_points = fingertip[:, None, 1] + th.linspace(0, 1, steps=self.movement_time).repeat(batch_size, 1) * (goal[:, None, 1] - fingertip[:, None, 1]) 
 
         self.traj = th.stack([x_points, y_points], dim=-1)
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 0] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, -1:, :].repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -187,12 +244,16 @@ class DlyHalfReach(env.Environment):
         action = action if self.differentiable else self.detach(action)
 
         obs = self.get_obs(0, deterministic=deterministic)
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -214,8 +275,8 @@ class DlyHalfCircleClk(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -242,7 +303,19 @@ class DlyHalfCircleClk(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t < self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -254,26 +327,40 @@ class DlyHalfCircleClk(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -281,13 +368,38 @@ class DlyHalfCircleClk(env.Environment):
 
         self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 1] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
@@ -321,15 +433,21 @@ class DlyHalfCircleClk(env.Environment):
         
         # Create full trajectory (center at fingertip)
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, -1, :].clone()
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 1] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, -1:, :].repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -346,6 +464,9 @@ class DlyHalfCircleClk(env.Environment):
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -368,8 +489,8 @@ class DlyHalfCircleCClk(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -396,7 +517,19 @@ class DlyHalfCircleCClk(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t < self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -408,26 +541,40 @@ class DlyHalfCircleCClk(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -435,13 +582,38 @@ class DlyHalfCircleCClk(env.Environment):
 
         self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 2] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
@@ -473,15 +645,21 @@ class DlyHalfCircleCClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, -1, :].clone()
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 2] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, -1:, :].repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -492,12 +670,16 @@ class DlyHalfCircleCClk(env.Environment):
         action = action if self.differentiable else self.detach(action)
 
         obs = self.get_obs(0, deterministic=deterministic)
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -520,8 +702,8 @@ class DlySinusoid(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -548,7 +730,19 @@ class DlySinusoid(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t < self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -560,26 +754,40 @@ class DlySinusoid(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -587,16 +795,43 @@ class DlySinusoid(env.Environment):
 
         self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 3] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
+
+        # x and y coordinates for movement, x is in 0-1 range, y is similar 
         x_points = th.linspace(0, 1, self.movement_time)
         y_points = th.sin(th.linspace(0, 2*np.pi, self.movement_time))
 
@@ -627,15 +862,21 @@ class DlySinusoid(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, -1, :].clone()
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 3] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, -1:, :].repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -652,6 +893,9 @@ class DlySinusoid(env.Environment):
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -674,8 +918,8 @@ class DlySinusoidInv(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -702,7 +946,19 @@ class DlySinusoidInv(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t < self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -714,26 +970,40 @@ class DlySinusoidInv(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -741,16 +1011,42 @@ class DlySinusoidInv(env.Environment):
 
         self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+        
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 4] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
+
         x_points = th.linspace(0, 1, self.movement_time)
         y_points = -th.sin(th.linspace(0, 2*np.pi, self.movement_time))
 
@@ -779,15 +1075,21 @@ class DlySinusoidInv(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, -1, :].clone()
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 4] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, -1:, :].repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -804,6 +1106,9 @@ class DlySinusoidInv(env.Environment):
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -826,8 +1131,8 @@ class DlyFullReach(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -854,7 +1159,19 @@ class DlyFullReach(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t < self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -866,26 +1183,40 @@ class DlyFullReach(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -894,13 +1225,38 @@ class DlyFullReach(env.Environment):
         self.half_movement_time = int(self.movement_time/2)
         self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size ,1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 5] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
@@ -919,7 +1275,6 @@ class DlyFullReach(env.Environment):
             point_idx = reach_conds
 
         goal = points[point_idx] * 0.25 + fingertip
-        self.vis_inp = goal.clone()
 
         # Draw a line from fingertip to goal 
         x_points_ext = fingertip[:, None, 0] + th.linspace(0, 1, steps=self.half_movement_time).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0]) 
@@ -934,14 +1289,20 @@ class DlyFullReach(env.Environment):
         backward_traj = th.stack([x_points_ret, y_points_ret], dim=-1)
         self.traj = th.cat([forward_traj, backward_traj], dim=1)
 
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, self.half_movement_time, :].unsqueeze(1).repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 5] = 1
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -958,6 +1319,9 @@ class DlyFullReach(env.Environment):
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -980,8 +1344,8 @@ class DlyFullCircleClk(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -1008,7 +1372,19 @@ class DlyFullCircleClk(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t <= self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -1020,26 +1396,40 @@ class DlyFullCircleClk(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -1048,13 +1438,38 @@ class DlyFullCircleClk(env.Environment):
         self.half_movement_time = int(self.movement_time/2)
         self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 6] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
@@ -1086,15 +1501,21 @@ class DlyFullCircleClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, self.half_movement_time, :].clone()
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 6] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, self.half_movement_time, :].unsqueeze(1).repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -1111,6 +1532,9 @@ class DlyFullCircleClk(env.Environment):
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -1133,8 +1557,8 @@ class DlyFullCircleCClk(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -1161,7 +1585,19 @@ class DlyFullCircleCClk(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t <= self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -1173,26 +1609,40 @@ class DlyFullCircleCClk(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -1201,13 +1651,38 @@ class DlyFullCircleCClk(env.Environment):
         self.half_movement_time = int(self.movement_time/2)
         self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 7] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
@@ -1239,15 +1714,21 @@ class DlyFullCircleCClk(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, self.half_movement_time, :].clone()
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 7] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, self.half_movement_time, :].unsqueeze(1).repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -1264,6 +1745,9 @@ class DlyFullCircleCClk(env.Environment):
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -1286,8 +1770,8 @@ class DlyFigure8(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -1314,7 +1798,19 @@ class DlyFigure8(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t <= self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -1326,26 +1822,40 @@ class DlyFigure8(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -1354,13 +1864,38 @@ class DlyFigure8(env.Environment):
         self.half_movement_time = int(self.movement_time/2)
         self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 8] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
@@ -1399,15 +1934,21 @@ class DlyFigure8(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, self.half_movement_time, :].clone()
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 8] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, self.half_movement_time, :].unsqueeze(1).repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -1424,6 +1965,9 @@ class DlyFigure8(env.Environment):
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info
 
 
@@ -1445,8 +1989,8 @@ class DlyFigure8Inv(env.Environment):
         obs_as_list = [
         self.rule_input,
         self.speed_scalar,
-        self.go_cue[:, t].unsqueeze(1),
-        self.vis_inp,
+        self.go_cue[:, t],
+        self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
         self.obs_buffer["proprioception"][0],
         ] + self.obs_buffer["action"][:self.action_frame_stacking]
@@ -1473,7 +2017,19 @@ class DlyFigure8Inv(env.Environment):
         obs = self.get_obs(t, action=noisy_action)
         reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
         terminated = bool(t >= self.max_ep_duration)
-        self.hidden_goal = self.initial_pos.clone() if t <= self.delay_time else self.traj[:, t - self.delay_time, :].clone()
+        t_delay_shifted = t - self.epoch_bounds["movement"][0]
+
+        """
+            Each stage of the trial is given here
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+        """
+        if t < self.epoch_bounds["delay"][1]:
+            self.hidden_goal = self.traj[:, 0, :]
+        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
+            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
+        elif t >= self.epoch_bounds["hold"][0]:
+            self.hidden_goal = self.traj[:, -1, :].clone()
+
         info = {
             "states": self._maybe_detach_states(),
             "action": action,
@@ -1485,26 +2041,40 @@ class DlyFigure8Inv(env.Environment):
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
+        #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
+
         self._set_generator(seed=seed)
 
         options = {} if options is None else options
         batch_size: int = options.get('batch_size', 1)
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
+        delay_cond = options.get('delay_cond', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
         deterministic: bool = options.get('deterministic', False)
-        
         self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        self.stable_time = 25
+        self.hold_time = 25
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [50, 75, 100]
-        self.delay_time = random.choice(delay_times)
+        delay_times = [25, 50, 75]
+        if delay_cond is None:
+            self.delay_time = random.choice(delay_times)
+        else:
+            self.delay_time = delay_times[delay_cond]
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
+
         if speed_cond is None:
             self.movement_time = random.choice(movement_times)
         else:
@@ -1513,13 +2083,38 @@ class DlyFigure8Inv(env.Environment):
         self.half_movement_time = int(self.movement_time/2)
         self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
 
-        self.go_cue = th.cat([
-            th.zeros(size=(batch_size, self.delay_time)),
-            th.ones(size=(batch_size, self.movement_time))
-        ], dim=-1)
+        # By here we should have the lengths of all task epochs
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time+self.delay_time),
+            "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
+            "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
+        }
 
         # Set duration
-        self.max_ep_duration = self.delay_time + self.movement_time - 1
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START STATIC NETWORK INPUT (except visual input)
+
+        self.go_cue = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+            th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0], 1))
+        ], dim=1)
+
+        # Now we need rule input
+        self.rule_input = th.zeros(
+            size=(batch_size, 10)
+        )
+
+        self.rule_input[:, 9] = 1
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
 
         # Get fingertip position for the target
         fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
@@ -1558,15 +2153,21 @@ class DlyFigure8Inv(env.Environment):
             rotated_points[i] = rotated_traj
         
         self.traj = rotated_points + fingertip[:, None, :]
-        self.vis_inp = self.traj[:, self.half_movement_time, :].clone()
-        self.initial_pos = self.states["fingertip"].clone()
-        self.hidden_goal = self.initial_pos.clone()
 
-        # Now we need rule input
-        self.rule_input = th.zeros(
-            size=(batch_size, 10)
-        )
-        self.rule_input[:, 9] = 1
+        # We want to start target onset after stable epoch
+        self.vis_inp = th.cat([
+            # [batch_size, stability timesteps, xy]
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], self.traj.shape[-1])),
+            # [batch_size, delay->hold timesteps, xy]
+            self.traj[:, self.half_movement_time, :].unsqueeze(1).repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+
+        #------------------------------------- END
+
+
+        #------------------------------------- START MOTORNET OBSERVATIONS
 
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
 
@@ -1583,4 +2184,7 @@ class DlyFigure8Inv(env.Environment):
             "noisy action": action,
             "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
         }
+
+        #------------------------------------- END
+
         return obs, info

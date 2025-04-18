@@ -3,7 +3,7 @@ import motornet as mn
 from model import RNNPolicy, GRUPolicy
 import torch
 import os
-from utils import load_hp, create_dir, save_fig, load_pickle
+from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 import matplotlib.pyplot as plt
@@ -18,6 +18,10 @@ import tqdm as tqdm
 import itertools
 from sklearn.decomposition import PCA
 from losses import l1_dist
+import scipy
+from mRNNTorch.analysis import flow_field
+import warnings
+warnings.filterwarnings("ignore")
 
 env_dict = {
     "DlyHalfReach": DlyHalfReach, 
@@ -35,6 +39,7 @@ env_dict = {
 def train_rnn512_softplus():
     model_path = "checkpoints/rnn512_softplus"
     model_file = "rnn512_softplus.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 512 UNITS")
     # leave hp as default
     train_2link(model_path, model_file)
 
@@ -42,6 +47,7 @@ def train_rnn256_softplus():
     hp = {"hid_size": 256}
     model_path = "checkpoints/rnn256_softplus"
     model_file = "rnn256_softplus.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -49,6 +55,7 @@ def train_rnn1024_softplus():
     hp = {"hid_size": 1024}
     model_path = "checkpoints/rnn1024_softplus"
     model_file = "rnn1024_softplus.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 1024 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -56,6 +63,7 @@ def train_rnn512_relu():
     hp = {"activation_name": "relu"}
     model_path = "checkpoints/rnn512_relu"
     model_file = "rnn512_relu.pth"
+    print("TRAINING RNN WITH RELU AND 512 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -63,6 +71,7 @@ def train_rnn256_relu():
     hp = {"hid_size": 256, "activation_name": "relu"}
     model_path = "checkpoints/rnn256_relu"
     model_file = "rnn256_relu.pth"
+    print("TRAINING RNN WITH RELU AND 256 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -70,6 +79,7 @@ def train_rnn1024_relu():
     hp = {"hid_size": 1024, "activation_name": "relu"}
     model_path = "checkpoints/rnn1024_relu"
     model_file = "rnn1024_relu.pth"
+    print("TRAINING RNN WITH RELU AND 1024 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -77,6 +87,7 @@ def train_rnn512_tanh():
     hp = {"activation_name": "tanh"}
     model_path = "checkpoints/rnn512_tanh"
     model_file = "rnn512_tanh.pth"
+    print("TRAINING RNN WITH TANH AND 512 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -84,6 +95,7 @@ def train_rnn256_tanh():
     hp = {"hid_size": 256, "activation_name": "tanh"}
     model_path = "checkpoints/rnn256_tanh"
     model_file = "rnn256_tanh.pth"
+    print("TRAINING RNN WITH TANH AND 256 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -91,6 +103,7 @@ def train_rnn1024_tanh():
     hp = {"hid_size": 1024, "activation_name": "tanh"}
     model_path = "checkpoints/rnn1024_tanh"
     model_file = "rnn1024_tanh.pth"
+    print("TRAINING RNN WITH TANH AND 1024 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -98,6 +111,7 @@ def train_gru512():
     hp = {"network": "gru"}
     model_path = "checkpoints/gru512"
     model_file = "gru512.pth"
+    print("TRAINING GRU WITH 512 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -105,6 +119,7 @@ def train_gru256():
     hp = {"hid_size": 256, "network": "gru"}
     model_path = "checkpoints/gru256"
     model_file = "gru256.pth"
+    print("TRAINING GRU WITH 256 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -112,6 +127,7 @@ def train_gru1024():
     hp = {"hid_size": 1024, "network": "gru"}
     model_path = "checkpoints/gru1024"
     model_file = "gru1024.pth"
+    print("TRAINING GRU WITH 1024 UNITS")
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
@@ -161,6 +177,7 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None):
 
     # initialize batch
     x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
+    h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
     
     obs, info = env.reset(testing=True, options=options)
     terminated = False
@@ -177,7 +194,6 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None):
     # simulate whole episode
     while not terminated:  # will run until `max_ep_duration` is reached
 
-        timesteps += 1
         # Check if ablating feedback
         if feedback_mask is not None:
             obs = obs * feedback_mask
@@ -185,12 +201,14 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None):
         with torch.no_grad():
             # Check if silencing units 
             if stim is not None:
-                x, h, action = policy(x, obs, stim, noise=False)
+                x, h, action = policy(obs, x, h, stim, noise=False)
             else:
-                x, h, action = policy(x, obs, noise=False)
+                x, h, action = policy(obs, x, h, noise=False)
 
             # Take step in motornet environment
             obs, reward, terminated, info = env.step(timesteps, action=action)
+
+        timesteps += 1
 
         # Save all information regarding episode step
         trial_data["h"].append(h.unsqueeze(1))  # trajectories
@@ -209,7 +227,7 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None):
 
 
 
-
+# TODO change for new setting with stable and hold epochs
 def plot_psth(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task
         This is not for kinematics
@@ -226,7 +244,34 @@ def plot_psth(model_name):
 
     create_dir(exp_path)
 
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
+    for env in env_dict:
+        for speed in range(10):
+
+            options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": speed, "delay_cond": 2}
+
+            trial_data = _test(model_path, model_file, options, env=env_dict[env])
+        
+            # Get kinematics and activity in a center out setting
+            # On random and delay
+            colors = plt.cm.inferno(np.linspace(0, 1, trial_data["h"].shape[0])) 
+
+            for i, h in enumerate(trial_data["h"]):
+                plt.plot(torch.mean(h, dim=-1), color=colors[i], linewidth=4)
+                plt.axvline(trial_data["delay_time"], linestyle="dashed", color="grey")
+            save_fig(os.path.join(exp_path, f"{env}_speed{speed}_tg_trajectory.png"))
+
+
+
+
+# TODO change for new setting with stable and hold epochs
+def plot_pca(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/pca"
+
+    create_dir(exp_path)
+    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": 5, "delay_cond": 0}
 
     for env in env_dict:
 
@@ -236,10 +281,52 @@ def plot_psth(model_name):
         # On random and delay
         colors = plt.cm.inferno(np.linspace(0, 1, trial_data["h"].shape[0])) 
 
+        pca_3d = PCA(n_components=3)
+        pca_3d.fit(trial_data["h"].reshape((-1, trial_data["h"].shape[-1])))
+
+        # Create a figure
+        fig3d = plt.figure()
+        # Add a 3D subplot
+        ax3d = fig3d.add_subplot(111, projection='3d')
         for i, h in enumerate(trial_data["h"]):
-            plt.plot(torch.mean(h, dim=-1), color=colors[i], linewidth=4)
-            plt.axvline(trial_data["delay_time"], linestyle="dashed", color="grey")
-        save_fig(os.path.join(exp_path, f"{env}_tg_trajectory.png"))
+
+            # transform
+            h_proj = pca_3d.transform(h)
+            # Plot the 3D line
+            ax3d.plot(h_proj[25:trial_data['delay_time'], 0], h_proj[25:trial_data['delay_time'], 1], h_proj[25:trial_data['delay_time'], 2], color=colors[i], linewidth=4, linestyle="dashed")
+            ax3d.plot(h_proj[trial_data['delay_time']:, 0], h_proj[trial_data['delay_time']:, 1], h_proj[trial_data['delay_time']:, 2], color=colors[i], linewidth=4)
+            # Set labels for axes
+            ax3d.set_xlabel('PC 1')
+            ax3d.set_ylabel('PC 2')
+            ax3d.set_zlabel('PC 3')
+            ax3d.set_title(f'{env} PCs')
+
+            ax3d.scatter(h_proj[25, 0], h_proj[25, 1], h_proj[25, 2], marker="^", color=colors[i], s=250, zorder=10)
+            ax3d.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], marker="X", color=colors[i], s=250, zorder=10)
+
+        save_fig(os.path.join(exp_path + "/3d", f"{env}_tg_trajectory.png"))
+
+        # Create a figure
+        fig2d = plt.figure()
+        # Add a 3D subplot
+        ax2d = fig2d.add_subplot(111)
+        for i, h in enumerate(trial_data["h"]):
+
+            # transform
+            h_proj = pca_3d.transform(h)
+            # Plot the 3D line
+            ax2d.plot(h_proj[25:trial_data['delay_time'], 0], h_proj[25:trial_data['delay_time'], 1], color=colors[i], linewidth=4, linestyle="dashed")
+            ax2d.plot(h_proj[trial_data['delay_time']:, 0], h_proj[trial_data['delay_time']:, 1], color=colors[i], linewidth=4)
+            # Set labels for axes
+            ax2d.set_xlabel('PC 1')
+            ax2d.set_ylabel('PC 2')
+            ax2d.set_title(f'{env} PCs')
+
+            ax2d.scatter(h_proj[25, 0], h_proj[25, 1], marker="^", color=colors[i], s=250, zorder=10)
+            ax2d.scatter(h_proj[-1, 0], h_proj[-1, 1], marker="X", color=colors[i], s=250, zorder=10)
+
+        save_fig(os.path.join(exp_path + "/2d", f"{env}_tg_trajectory.png"))
+
 
 
 
@@ -260,12 +347,10 @@ def plot_task_trajectories(model_name):
 
     create_dir(exp_path)
 
-    speed_conds = np.arange(0, 10)
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
-
     for env in env_dict:
-        for speed in speed_conds:
-            options["speed_cond"] = speed
+        for speed in range(10):
+
+            options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": speed}
 
             effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
             cur_env = env_dict[env](effector=effector)
@@ -285,7 +370,92 @@ def plot_task_trajectories(model_name):
 
 
 
-def plot_task_inputs(model_name):
+def plot_task_input_output(model_name):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
+
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/input"
+
+    create_dir(exp_path)
+
+    for env in env_dict:
+
+        options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": 5, "delay_cond": 0}
+
+        effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+        cur_env = env_dict[env](effector=effector)
+        
+        obs, info = cur_env.reset(testing=True, options=options)
+
+        for batch in range(options["batch_size"]):
+
+            fig, ax = plt.subplots(5, 1)
+            fig.set_size_inches(3, 6)
+            plt.rc('font', size=6)
+
+            ax[0].imshow(cur_env.rule_input[batch].unsqueeze(0).repeat(cur_env.max_ep_duration, 1).T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            # Remove top and right only (common for minimalist style)
+            ax[0].spines['top'].set_visible(False)
+            ax[0].spines['right'].set_visible(False)
+            ax[0].spines['bottom'].set_visible(False)
+            ax[0].set_xticks([])
+            ax[0].set_title("Rule Input")
+            ax[0].axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax[0].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax[0].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+
+            ax[1].plot(cur_env.speed_scalar[batch].unsqueeze(0).repeat(cur_env.max_ep_duration, 1), color="blue")
+            ax[1].spines['top'].set_visible(False)
+            ax[1].spines['right'].set_visible(False)
+            ax[1].spines['bottom'].set_visible(False)
+            ax[1].set_xticks([])
+            ax[1].set_title("Speed Scalar")
+            ax[1].axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax[1].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax[1].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+
+            ax[2].plot(cur_env.go_cue[batch], color="blue")
+            ax[2].spines['top'].set_visible(False)
+            ax[2].spines['right'].set_visible(False)
+            ax[2].spines['bottom'].set_visible(False)
+            ax[2].set_xticks([])
+            ax[2].set_title("Go Cue")
+            ax[2].axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax[2].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax[2].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+
+            ax[3].imshow(cur_env.vis_inp[batch].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[3].spines['top'].set_visible(False)
+            ax[3].spines['right'].set_visible(False)
+            ax[3].spines['bottom'].set_visible(False)
+            ax[3].set_xticks([])
+            ax[3].set_title("Visual Input")
+            ax[3].axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax[3].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax[3].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+
+            ax[4].imshow(cur_env.traj[batch].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[4].spines['top'].set_visible(False)
+            ax[4].spines['right'].set_visible(False)
+            ax[4].spines['bottom'].set_visible(False)
+            ax[4].set_xticks([])
+            ax[4].set_title("Tg Output (Only Movement Epoch)")
+
+            save_fig(os.path.join(exp_path, f"{env}_input_orientation{batch}"))
+
+
+
+
+# TODO change for new setting with stable and hold epochs
+def plot_task_feedback(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task
         This is not for kinematics
 
@@ -309,8 +479,9 @@ def plot_task_inputs(model_name):
     
         for i, inp in enumerate(trial_data["obs"]):
 
-            fig, ax = plt.subplots(6, 1)
-            fig.set_size_inches(4, 6)
+            fig, ax = plt.subplots(7, 1)
+            fig.set_size_inches(3, 6)
+            plt.rc('font', size=6)
 
             ax[0].imshow(inp[:, :10].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             # Remove top and right only (common for minimalist style)
@@ -318,40 +489,55 @@ def plot_task_inputs(model_name):
             ax[0].spines['right'].set_visible(False)
             ax[0].spines['bottom'].set_visible(False)
             ax[0].set_xticks([])
+            ax[0].set_title("Rule Input")
 
             ax[1].plot(inp[:, 10:11], color="blue")
             ax[1].spines['top'].set_visible(False)
             ax[1].spines['right'].set_visible(False)
             ax[1].spines['bottom'].set_visible(False)
             ax[1].set_xticks([])
+            ax[1].set_title("Speed Scalar")
 
-            ax[2].imshow(inp[:, 11:13].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[2].plot(inp[:, 11:12], color="blue")
             ax[2].spines['top'].set_visible(False)
             ax[2].spines['right'].set_visible(False)
             ax[2].spines['bottom'].set_visible(False)
             ax[2].set_xticks([])
+            ax[2].set_title("Go Cue")
 
-            ax[3].imshow(inp[:, 13:15].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[3].imshow(inp[:, 12:14].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             ax[3].spines['top'].set_visible(False)
             ax[3].spines['right'].set_visible(False)
             ax[3].spines['bottom'].set_visible(False)
             ax[3].set_xticks([])
+            ax[3].set_title("Target Position")
 
-            ax[4].imshow(inp[:, 15:21].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[4].imshow(inp[:, 14:16].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             ax[4].spines['top'].set_visible(False)
             ax[4].spines['right'].set_visible(False)
             ax[4].spines['bottom'].set_visible(False)
             ax[4].set_xticks([])
+            ax[4].set_title("Fingertip")
 
-            ax[5].imshow(inp[:, 21:27].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[5].imshow(inp[:, 16:22].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
             ax[5].spines['top'].set_visible(False)
             ax[5].spines['right'].set_visible(False)
             ax[5].spines['bottom'].set_visible(False)
+            ax[5].set_xticks([])
+            ax[5].set_title("Muscle Length")
+            
+            ax[6].imshow(inp[:, 22:28].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[6].spines['top'].set_visible(False)
+            ax[6].spines['right'].set_visible(False)
+            ax[6].spines['bottom'].set_visible(False)
+            ax[6].set_title("Muscle Velocity")
+
             save_fig(os.path.join(exp_path, f"{env}_input_orientation{i}"))
 
 
 
 
+# TODO change for new setting with stable and hold epochs
 def plot_task_kinematics(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task
         This is not for kinematics
@@ -368,48 +554,62 @@ def plot_task_kinematics(model_name):
 
     create_dir(exp_path)
 
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
-
     for env in env_dict:
+        for speed in range(10):
 
-        trial_data = _test(model_path, model_file, options, env=env_dict[env])
-    
-        # Get kinematics and activity in a center out setting
-        # On random and delay
-        colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[1])) 
+            options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": speed}
 
-        for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
-            plt.scatter(xy[:, 0], xy[:, 1], s=10, color=colors)
-            plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color="black")
-            plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
-        save_fig(os.path.join(exp_path, f"{env}_kinematics.png"))
+            trial_data = _test(model_path, model_file, options, env=env_dict[env])
+        
+            # Get kinematics and activity in a center out setting
+            # On random and delay
+            colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[1])) 
+
+            for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
+                plt.scatter(xy[:, 0], xy[:, 1], s=10, color=colors)
+                plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color="black")
+                plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
+            save_fig(os.path.join(exp_path, f"{env}_speed{speed}_kinematics.png"))
 
 
 
 
+# TODO change for new setting with stable and hold epochs
 def variance_by_rule(model_name):
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
-
-    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
+    hp = load_hp(model_path)
 
     env_var_dict = {}
-    var_list = []
+    var_dir_tensor = torch.empty(size=(hp["hid_size"], len(env_dict)))
     task_list = []
 
-    for env in env_dict:
-        trial_data = _test(model_path, model_file, options, env=env_dict[env])
-        # Should be of shape batch, time, neurons
-        h = trial_data["h"]
-        task_var = h.var(dim=0)
-        mean_task_var = task_var.mean(dim=0)
+    # Need to know the current largest timestep possible given speeds (ignoring delay)
+    max_timesteps = 300
 
-        var_list.append(mean_task_var)
+    for i, env in enumerate(env_dict):
+        dir_var_list = []
+        for speed in range(10):
+
+            options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "speed_cond": speed, "delay_cond": 0}
+            trial_data = _test(model_path, model_file, options, env=env_dict[env])
+            delay_time = trial_data["delay_time"]
+
+            # Should be of shape batch, time, neurons
+            h = trial_data["h"]
+
+            # Focus on movement only
+            interpolated_trials = torch.stack([interpolate_trial(direction[delay_time:], max_timesteps) for direction in h])
+            dir_var_list.append(interpolated_trials)
+
+        var_dir = torch.cat(dir_var_list).var(dim=0).mean(dim=0)
+        var_dir_tensor[:, i] = var_dir
         task_list.append(env)
-
-    env_var_dict["h_var_all"] = torch.stack(var_list, dim=1).numpy()
+    
+    total_var = var_dir_tensor
+    env_var_dict["h_var_all"] = total_var.numpy()
     env_var_dict["keys"] = task_list
     
     save_name = 'variance_rule'
@@ -421,6 +621,7 @@ def variance_by_rule(model_name):
 
 
 
+# TODO change for new setting with stable and hold epochs
 def variance_by_epoch(model_name):
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
@@ -485,6 +686,7 @@ def plot_variance_by_epoch(model_name):
 
 
 
+# TODO change for new setting with stable and hold epochs
 def compute_fps(model_name):
 
     model_path = f"checkpoints/{model_name}"
@@ -495,11 +697,9 @@ def compute_fps(model_name):
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4)}
+    options = {"batch_size": 2, "reach_conds": torch.arange(0, 32, 16), "delay_cond": 1, "speed_cond": 5}
 
     hp = load_hp(model_path)
-    hp = hp.copy()
-    hp["batch_size"] = options["batch_size"]
     
     device = "cpu"
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
@@ -546,7 +746,7 @@ def compute_fps(model_name):
         env_fps_list = []
         for b, condition in enumerate(trial_data["h"]):
             for t, timepoint in enumerate(condition):
-                if t % 10 == 0:
+                if t % 150 == 0:
 
                     print(f"Env: {env},  Condition: {b},  Timepoint: {t}")
 
@@ -578,6 +778,7 @@ def compute_fps(model_name):
 
 
 
+# TODO change for new setting with stable and hold epochs
 def plot_fps(model_name):
 
     model_path = f"checkpoints/{model_name}"
@@ -586,10 +787,28 @@ def plot_fps(model_name):
 
     fps = load_pickle(load_name)
 
-    timepoints = [40, 140]
     colors = plt.cm.inferno(np.linspace(0, 1, 8)) 
 
+    half_envs = [
+        "DlyHalfReach", 
+        "DlyHalfCircleClk", 
+        "DlyHalfCircleCClk", 
+        "DlySinusoid", 
+        "DlySinusoidInv",
+    ]
+    full_envs = [
+        "DlyFullReach",
+        "DlyFullCircleClk",
+        "DlyFullCircleCClk",
+        "DlyFigure8",
+        "DlyFigure8Inv"
+    ]
+
     for env in fps:
+        if env in half_envs:
+            timepoints = [150]
+        elif env in full_envs:
+            timepoints = [150]
         env_fps = fps[env]
         for i, t in enumerate(timepoints):
             all_condition_fps = []
@@ -613,6 +832,97 @@ def plot_fps(model_name):
 
 
 
+# TODO change for new setting with stable and hold epochs
+def plot_flow_fields(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/flow"
+
+    # Get variance of units across tasks and save to pickle file in model directory
+    # Doing so across rules only
+    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "delay_cond": 1, "speed_cond": 5}
+
+    hp = load_hp(model_path)
+    
+    device = "cpu"
+    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+
+    # Loading in model
+    if hp["network"] == "rnn":
+        policy = RNNPolicy(
+            hp["inp_size"],
+            hp["hid_size"],
+            effector.n_muscles, 
+            activation_name=hp["activation_name"],
+            noise_level_act=hp["noise_level_act"], 
+            noise_level_inp=hp["noise_level_inp"], 
+            constrained=hp["constrained"], 
+            dt=hp["dt"],
+            t_const=hp["t_const"],
+            device=device
+        )
+    elif hp["network"] == "gru":
+        policy = GRUPolicy(hp["inp_size"], hp["hid_size"], effector.n_muscles, batch_first=True)
+    else:
+        raise ValueError("Not a valid architecture")
+
+    checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
+    policy.load_state_dict(checkpoint['agent_state_dict'])
+
+    env_fps = {}
+
+    font = {'size' : 18}
+    plt.rcParams['figure.figsize'] = [4, 4]
+    plt.rcParams['axes.linewidth'] = 1 # set the value globally
+    plt.rc('font', **font)
+
+    for env in env_dict:
+        trial_data = _test(model_path, model_file, options, env=env_dict[env])
+        env_pca = PCA(n_components=2)
+        for b, condition in enumerate(trial_data["h"]):
+
+            print(f"Env: {env},  Condition: {b}")
+
+            env_pca.fit(trial_data["h"][b])
+            reduced_h = env_pca.transform(condition)
+            coords, x_vel, y_vel, speed = flow_field(
+                policy.mrnn, 
+                trial_data["h"][b:b+1], 
+                trial_data["obs"][b:b+1], 
+                time_skips=10, 
+                x_offset=30, 
+                y_offset=30
+            )
+
+            for t, coords_t in enumerate(coords):
+                # Add line collection
+                fig, ax = plt.subplots()
+                # Create plot
+                ax.streamplot(
+                    coords_t[:, :, 0], 
+                    coords_t[:, :, 1], 
+                    x_vel[t], 
+                    y_vel[t], 
+                    color=speed[t], 
+                    cmap="plasma", 
+                    linewidth=3, 
+                    arrowsize=2, 
+                    zorder=0,
+                )
+
+                ax.plot(reduced_h[:t*10, 0], reduced_h[:t*10, 1], linewidth=3)
+
+                # Other plotting parameters
+                ax.set_yticks([])
+                ax.set_xticks([])
+                plt.tight_layout()
+                save_fig(os.path.join(exp_path, env, f"cond_{b}", f"t_{t}_flow.png"))
+
+
+
+
+# TODO change for new setting with stable and hold epochs
 def neural_principle_angles(model_name):
 
     model_path = f"checkpoints/{model_name}"
@@ -621,13 +931,13 @@ def neural_principle_angles(model_name):
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
-    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 0, "speed_cond": 5}
 
     trial_data_envs = {}
     for env in env_dict:
 
         trial_data = _test(model_path, model_file, options, env=env_dict[env])
-        trial_data_envs[env] = trial_data["h"]
+        trial_data_envs[env] = trial_data["h"][:, trial_data["delay_time"]:]
 
     # Get all unique pairs of unit activity across tasks
     combinations = list(itertools.combinations(trial_data_envs, 2))
@@ -659,6 +969,7 @@ def neural_principle_angles(model_name):
 
 
 
+# TODO change for new setting with stable and hold epochs
 def muscle_principle_angles(model_name):
 
     model_path = f"checkpoints/{model_name}"
@@ -667,13 +978,13 @@ def muscle_principle_angles(model_name):
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
-    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 0, "speed_cond": 5}
 
     trial_data_envs = {}
     for env in env_dict:
 
         trial_data = _test(model_path, model_file, options, env=env_dict[env])
-        trial_data_envs[env] = trial_data["muscle_acts"]
+        trial_data_envs[env] = trial_data["muscle_acts"][:, trial_data["delay_time"]:]
 
     # Get all unique pairs of unit activity across tasks
     combinations = list(itertools.combinations(trial_data_envs, 2))
@@ -692,8 +1003,8 @@ def muscle_principle_angles(model_name):
         pca1_comps = pca1.components_[:3]
         pca2_comps = pca2.components_[:3]
 
-        inner_prod_mat = pca1_comps @ pca2_comps.T # Should be m x m
-        U, s, Vh = np.linalg.svd(inner_prod_mat)
+        inner_prod_mat = (pca1_comps @ pca2_comps.T).astype(np.float64) # Should be m x m
+        U, s, Vh = scipy.linalg.svd(inner_prod_mat)
         angles = np.degrees(np.arccos(s))
 
         angles_dict[combination] = angles
@@ -711,6 +1022,7 @@ def dpca(model_name):
 
 
 
+# TODO change for new setting with stable and hold epochs
 def module_silencing(model_name):
 
     model_path = f"checkpoints/{model_name}"
@@ -720,7 +1032,7 @@ def module_silencing(model_name):
     hp = load_hp(model_path)
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
-    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 0, "speed_cond": 5}
 
     clustering = Analysis(model_path, "rule")
 
@@ -738,6 +1050,7 @@ def module_silencing(model_name):
             trial_data_control = _test(model_path, model_file, options, env=env_dict[env])
             control_loss = l1_dist(trial_data_control["xy"], trial_data_control["tg"])
 
+            # Stim trial
             trial_data_stim = _test(model_path, model_file, options, env=env_dict[env], stim=silencing_mask)
             stim_loss = l1_dist(trial_data_stim["xy"], trial_data_stim["tg"])
             
@@ -755,6 +1068,7 @@ def module_silencing(model_name):
 
 
 
+# TODO change for new setting with stable and hold epochs
 def feedback_ablation(model_name):
 
     model_path = f"checkpoints/{model_name}"
@@ -764,32 +1078,36 @@ def feedback_ablation(model_name):
     hp = load_hp(model_path)
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
-    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1)}
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 0, "speed_cond": 5}
 
     feedback_masks = {}
     # Build masks for ablating input
-    rule_mask = torch.ones(size=(options["batch_size"], 27))
+    rule_mask = torch.ones(size=(options["batch_size"], 28))
     rule_mask[:10] = 0
     feedback_masks["rule"] = rule_mask
 
-    go_mask = torch.ones(size=(options["batch_size"], 27))
-    go_mask[10:11] = 0
-    feedback_masks["go_cue"] = go_mask
+    speed_mask = torch.ones(size=(options["batch_size"], 28))
+    speed_mask[10:11] = 0
+    feedback_masks["speed_scalar"] = speed_mask
 
-    tg_mask = torch.ones(size=(options["batch_size"], 27))
-    tg_mask[11:13] = 0
+    go_mask = torch.ones(size=(options["batch_size"], 28))
+    go_mask[11:12] = 0
+    feedback_masks["speed_scalar"] = go_mask
+
+    tg_mask = torch.ones(size=(options["batch_size"], 28))
+    tg_mask[12:14] = 0
     feedback_masks["vis_inp"] = tg_mask
 
-    fg_mask = torch.ones(size=(options["batch_size"], 27))
-    fg_mask[13:15] = 0
+    fg_mask = torch.ones(size=(options["batch_size"], 28))
+    fg_mask[14:16] = 0
     feedback_masks["vis_feedback"] = fg_mask
 
-    length_mask = torch.ones(size=(options["batch_size"], 27))
-    length_mask[15:21] = 0
+    length_mask = torch.ones(size=(options["batch_size"], 28))
+    length_mask[16:22] = 0
     feedback_masks["muscle_length"] = length_mask
 
-    vel_mask = torch.ones(size=(options["batch_size"], 27))
-    vel_mask[21:27] = 0
+    vel_mask = torch.ones(size=(options["batch_size"], 28))
+    vel_mask[22:28] = 0
     feedback_masks["muscle_vel"] = vel_mask
 
     change_loss_envs = torch.empty(size=(len(env_dict), len(feedback_masks)))
@@ -797,10 +1115,12 @@ def feedback_ablation(model_name):
         for j, mask in enumerate(feedback_masks):
 
             print(f"Ablating {mask} in env {env}")
+
             # Control trial
             trial_data_control = _test(model_path, model_file, options, env=env_dict[env])
             control_loss = l1_dist(trial_data_control["xy"], trial_data_control["tg"])
 
+            # Stim trial
             trial_data_stim = _test(model_path, model_file, options, env=env_dict[env], feedback_mask=feedback_masks[mask])
             stim_loss = l1_dist(trial_data_stim["xy"], trial_data_stim["tg"])
             
@@ -848,12 +1168,16 @@ if __name__ == "__main__":
         train_gru512() 
     elif args.experiment == "train_gru1024":
         train_gru1024() 
+    elif args.experiment == "plot_pca":
+        plot_pca(args.model_name) 
     elif args.experiment == "plot_psth":
         plot_psth(args.model_name) 
     elif args.experiment == "plot_task_trajectories":
         plot_task_trajectories(args.model_name) 
-    elif args.experiment == "plot_task_inputs":
-        plot_task_inputs(args.model_name) 
+    elif args.experiment == "plot_task_input_output":
+        plot_task_input_output(args.model_name) 
+    elif args.experiment == "plot_task_feedback":
+        plot_task_feedback(args.model_name) 
     elif args.experiment == "plot_task_kinematics":
         plot_task_kinematics(args.model_name) 
     elif args.experiment == "variance_by_rule":
@@ -876,3 +1200,5 @@ if __name__ == "__main__":
         module_silencing(args.model_name) 
     elif args.experiment == "feedback_ablation":
         feedback_ablation(args.model_name) 
+    elif args.experiment == "plot_flow_fields":
+        plot_flow_fields(args.model_name) 

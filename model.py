@@ -70,9 +70,9 @@ class RNNPolicy(nn.Module):
 
         self.to(device)
 
-    def forward(self, x, obs, *args, noise=True):
+    def forward(self, obs, x, h, *args, noise=True):
         # Forward pass through mRNN
-        x, h = self.mrnn(obs[:, None, :], x, *args, noise=noise)
+        x, h = self.mrnn(obs[:, None, :], x, h, *args, noise=noise)
         # Squeeze in the time dimension (doing timesteps one by one)
         h = h.squeeze(1)
         x = x.squeeze(1)

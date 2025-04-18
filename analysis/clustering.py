@@ -54,6 +54,7 @@ class Analysis(object):
         # ind_active = np.where(h_var_all_.sum(axis=1) > 1e-2)[0]
         ind_active = np.where(h_var_all_.sum(axis=1) > 1e-3)[0]
         h_var_all  = h_var_all_[ind_active, :]
+        print(h_var_all.shape)
 
         # Normalize by the total variance across tasks
         if normalization_method == 'sum':
@@ -78,7 +79,7 @@ class Analysis(object):
         labels_list = list()
         for n_cluster in n_clusters:
             # clustering = AgglomerativeClustering(n_cluster, affinity='cosine', linkage='average')
-            clustering = KMeans(n_cluster, n_init=20, random_state=0)
+            clustering = KMeans(n_cluster, n_init=100, max_iter=1000, random_state=0)
             clustering.fit(X) # n_samples, n_features = n_units, n_rules/n_epochs
             labels = clustering.labels_ # cluster labels
 
@@ -283,6 +284,7 @@ class Analysis(object):
         else:
             raise NotImplementedError
 
+        print(self.h_normvar_all.shape)
         Y = model.fit_transform(self.h_normvar_all)
 
         fig = plt.figure(figsize=(2, 2))

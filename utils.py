@@ -2,6 +2,10 @@ import json
 import os
 import matplotlib.pyplot as plt
 import pickle
+import scipy
+from scipy.interpolate import interp1d
+import numpy as np
+import torch
 
 def save_hp(hp, model_dir):
     """Save the hyper-parameter file of model save_name"""
@@ -43,3 +47,20 @@ def load_pickle(file):
         print('Unable to load data ', file, ':', e)
         raise
     return data
+
+def interpolate_trial(ys, desired_x):
+    """
+        ys is the time series [timesteps, neurons]
+        desired x is the total number of points desired after interpolating
+    """
+    # range for x is somewhat arb, going with 0-1
+    xs = torch.linspace(0, 1, ys.shape[0])
+    new_xs = torch.linspace(0, 1, desired_x)
+
+    int_neurons = []
+    # Loop through each neuron to get single timeseries
+    for n in range(ys.shape[1]):
+        t_series = interp1d(xs, ys[:, n])(new_xs)
+        int_neurons.append(torch.tensor(t_series))
+    new_t_series = torch.stack(int_neurons, dim=1)
+    return new_t_series

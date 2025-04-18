@@ -76,14 +76,15 @@ def do_eval(policy, hp):
             timestep = 0
             # simulate whole episode
             while not terminated:  # will run until `max_ep_duration` is reached
-                timestep += 1
 
                 with torch.no_grad():
-                    x, h, action = policy(x, obs)
+                    x, h, action = policy(obs, x, h)
                     obs, reward, terminated, info = cur_env.step(timestep, action=action)
 
                 xy.append(info["states"]["fingertip"][:, None, :])  # trajectories
                 tg.append(info["goal"][:, None, :])  # targets
+
+                timestep += 1
 
             # concatenate into a (batch_size, n_timesteps, xy) tensor
             xy = torch.cat(xy, axis=1)
@@ -145,7 +146,7 @@ def train_2link(model_path, model_file, hp=None):
 
     losses = []
     interval = 100
-    best_test_loss = -np.inf
+    best_test_loss = np.inf
 
     env_list = [
         DlyHalfReach, 
@@ -183,15 +184,16 @@ def train_2link(model_path, model_file, hp=None):
         timestep = 0
         # simulate whole episode
         while not terminated:  # will run until `max_ep_duration` is reached
-            timestep += 1
 
-            x, h, action = policy(x, obs)
+            x, h, action = policy(obs, x, h)
             obs, reward, terminated, info = env.step(timestep, action=action)
 
             xy.append(info["states"]["fingertip"][:, None, :])  # trajectories
             tg.append(info["goal"][:, None, :])  # targets
             muscle_acts.append(info["states"]["muscle"][:, 0].unsqueeze(1))
             hs.append(h.unsqueeze(1))
+
+            timestep += 1
 
         # concatenate into a (batch_size, n_timesteps, xy) tensor
         xy = torch.cat(xy, axis=1)
@@ -220,7 +222,7 @@ def train_2link(model_path, model_file, hp=None):
             # Get test loss
             test_loss = do_eval(policy, hp)
             # If current test loss is better than previous, save model and update best loss
-            if test_loss >= best_test_loss:
+            if test_loss <= best_test_loss:
                 best_test_loss = test_loss
                 torch.save({
                     'agent_state_dict': policy.state_dict(),
