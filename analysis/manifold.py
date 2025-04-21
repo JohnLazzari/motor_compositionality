@@ -91,28 +91,24 @@ def vaf_ratio(combinations):
         # ------------------------------------ TRUE ACROSS AND WITHIN TASK VAFs
 
         # Get VAF
-        across_task_vaf_task1 = (pca2_comps @ task1_data.T).T.var() / task1_data.var()
-        within_task_vaf_task1 = (pca1_comps @ task1_data.T).T.var() / task1_data.var()
+        across_task_vaf_task1 = (pca2_comps @ task1_data.T).T.var(axis=0).sum() / task1_data.var(axis=0).sum()
+        within_task_vaf_task1 = (pca1_comps @ task1_data.T).T.var(axis=0).sum() / task1_data.var(axis=0).sum()
         ratio_task1 = across_task_vaf_task1 / within_task_vaf_task1
         vaf_ratio_list.append(ratio_task1)
 
-        across_task_vaf_task2 = (pca1_comps @ task2_data.T).T.var() / task2_data.var()
-        within_task_vaf_task2 = (pca2_comps @ task2_data.T).T.var() / task2_data.var()
+        across_task_vaf_task2 = (pca1_comps @ task2_data.T).T.var(axis=0).sum() / task2_data.var(axis=0).sum()
+        within_task_vaf_task2 = (pca2_comps @ task2_data.T).T.var(axis=0).sum() / task2_data.var(axis=0).sum()
         ratio_task2 = across_task_vaf_task2 / within_task_vaf_task2
         vaf_ratio_list.append(ratio_task2)
 
         # ------------------------------------ CONTROL ACROSS TASK VAFs
 
-        task1_controls = []
         # Get random VAFs
-        across_task_vaf = (random_bases[:, :12, :] @ task1_data.T).var(axis=(1, 2)) / task1_data.var()
-        task1_controls.append(across_task_vaf)
-        vaf_ratio_list_control.append(np.percentile(task1_controls, 90) / within_task_vaf_task1)
+        across_task_vaf = (random_bases[:, :12, :] @ task1_data.T).var(axis=2).sum(axis=1) / task1_data.var(axis=0).sum()
+        vaf_ratio_list_control.append(np.percentile(across_task_vaf, 90) / within_task_vaf_task1)
 
-        task2_controls = []
         # Get random VAFs
-        across_task_vaf = (random_bases[:, :12, :] @ task2_data.T).var(axis=(1, 2)) / task2_data.var()
-        task2_controls.append(across_task_vaf)
-        vaf_ratio_list_control.append(np.percentile(task2_controls, 90) / within_task_vaf_task2)
+        across_task_vaf = (random_bases[:, :12, :] @ task2_data.T).var(axis=2).sum(axis=1) / task2_data.var(axis=0).sum()
+        vaf_ratio_list_control.append(np.percentile(across_task_vaf, 90) / within_task_vaf_task2)
     
     return vaf_ratio_list, vaf_ratio_list_control

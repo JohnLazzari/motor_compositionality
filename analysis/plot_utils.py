@@ -158,6 +158,7 @@ def plot_fixed_point(fp, pca,
     stable_marker='.',
     unstable_color='r',
     unstable_marker=None,
+    make_plot=True,
     **kwargs):
     '''Plots a single fixed point and its dominant eigenmodes.
 
@@ -265,11 +266,14 @@ def plot_fixed_point(fp, pca,
         else:
             zstar = xstar
 
-        plot_123d(zstar,
-                  color=color,
-                  marker=marker,
-                  markersize=12,
-                  **kwargs)
+        if make_plot:
+            plot_123d(zstar,
+                    color=color,
+                    marker=marker,
+                    markersize=12,
+                    **kwargs)
+        else:
+            return zstar
 
 def plot_123d(z, **kwargs):
     '''Plots in 1D, 2D, or 3D.
