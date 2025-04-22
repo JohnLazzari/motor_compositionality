@@ -51,7 +51,6 @@ def plot_task_kinematics(model_name):
     model_file = f"{model_name}.pth"
     exp_path = f"results/{model_name}/kinematics"
 
-    create_dir(exp_path)
 
     for env in env_dict:
         for speed in range(10):
@@ -69,17 +68,26 @@ def plot_task_kinematics(model_name):
                 plt.scatter(xy[:, 0], xy[:, 1], s=10, color=colors_time)
                 plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color="black")
                 plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color="black")
-            save_fig(os.path.join(exp_path, "scatter", f"{env}_speed{speed}_kinematics.png"))
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "scatter", f"{env}_speed{speed}_kinematics.eps"), eps=True)
 
             # Plot x coordinate only 
             for i, xy in enumerate(trial_data["xy"]):
                 plt.plot(xy[:, 0], color=colors_xy[i])
-            save_fig(os.path.join(exp_path, "xpos", f"{env}_speed{speed}_xpos.png"))
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "xpos", f"{env}_speed{speed}_xpos.eps"), eps=True)
 
             # Plot y coordinate only 
             for i, xy in enumerate(trial_data["xy"]):
                 plt.plot(xy[:, 1], color=colors_xy[i])
-            save_fig(os.path.join(exp_path, "ypos", f"{env}_speed{speed}_ypos.png"))
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "ypos", f"{env}_speed{speed}_ypos.eps"), eps=True)
 
 
 

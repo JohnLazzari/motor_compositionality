@@ -221,11 +221,14 @@ def _plot_interpolated_fps(model_name, task1, task2):
         task1_h_reduced = task1_pca.transform(trial_data1["h"][i])
         task2_h_reduced = task1_pca.transform(trial_data2["h"][i])
 
-        ax.plot(np.zeros_like(task1_h_reduced[:, 0]), task1_h_reduced[:, 0], task1_h_reduced[:, 1])
-        ax.plot(np.ones_like(task2_h_reduced[:, 0]), task2_h_reduced[:, 0], task2_h_reduced[:, 1])
+        ax.plot(np.zeros_like(task1_h_reduced[:, 0]), task1_h_reduced[:, 0], task1_h_reduced[:, 1], linewidth=4, color="skyblue")
+        ax.plot(np.ones_like(task2_h_reduced[:, 0]), task2_h_reduced[:, 0], task2_h_reduced[:, 1], linewidth=4, color="purple")
 
-        ax.scatter(0, task1_h_reduced[0, 0], task1_h_reduced[0, 1], marker="^")
-        ax.scatter(1, task2_h_reduced[-1, 0], task2_h_reduced[-1, 1], marker="x")
+        ax.scatter(0, task1_h_reduced[0, 0], task1_h_reduced[0, 1], marker="^", s=100, color="black")
+        ax.scatter(0, task1_h_reduced[-1, 0], task1_h_reduced[-1, 1], marker="x", s=100, color="black")
+
+        ax.scatter(1, task2_h_reduced[0, 0], task2_h_reduced[0, 1], marker="^", s=100, color="black")
+        ax.scatter(1, task2_h_reduced[-1, 0], task2_h_reduced[-1, 1], marker="x", s=100, color="black")
 
         for j, fps_step in enumerate(interpolated_fps):
             n_inits = fps_step.n
@@ -235,8 +238,9 @@ def _plot_interpolated_fps(model_name, task1, task2):
                             task1_pca,
                             make_plot=False
                         )
-                ax.plot((j/20)*np.ones_like(zstar)[:, 0], zstar[:, 0], zstar[:, 1], marker='.', alpha=0.5, color=colors[j])
+                ax.plot((j/20)*np.ones_like(zstar)[:, 0], zstar[:, 0], zstar[:, 1], marker='.', alpha=0.5, color=colors[j], markersize=12)
 
+        ax.grid(False)
         save_fig(os.path.join(exp_path, save_name))
 
 
@@ -289,6 +293,42 @@ def ve_halfreach_figure8inv(model_name):
 def ve_halfcircleclk_fullcircleclk(model_name):
     _two_task_variance_explained(model_name, "DlyHalfCircleClk", "DlyFullCircleClk")
 
+
+
+
+
+def angles_vs_distance(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/compositionality/variance_explained"
+
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 1, "speed_cond": 5}
+
+    trial_data_1 = _test(model_path, model_file, options, env=env_dict[task1])
+    trial_data_2 = _test(model_path, model_file, options, env=env_dict[task2])
+
+    task1_h = trial_data_1["h"].reshape((-1, trial_data_1["h"].shape[-1]))
+    task2_h = trial_data_2["h"].reshape((-1, trial_data_2["h"].shape[-1]))
+
+    pca_task1 = PCA()
+    pca_task1.fit(task1_h)
+
+    variance_task_1 = []
+    for comp_idx in range(1, 50):
+        variance_explained = (pca_task1.components_[:comp_idx] @ task1_h.T.numpy()).var(axis=1).sum() / task1_h.var(axis=0).sum()
+        variance_task_1.append(variance_explained)
+
+    variance_task_2 = []
+    for comp_idx in range(1, 50):
+        variance_explained = (pca_task1.components_[:comp_idx] @ task2_h.T.numpy()).var(axis=1).sum() / task2_h.var(axis=0).sum()
+        variance_task_2.append(variance_explained)
+        
+    plt.rc('figure', figsize=(4, 6))
+    plt.plot(variance_task_1, color="black", marker="o", alpha=0.5, label=task1, markersize=10)
+    plt.plot(variance_task_2, color="purple", marker="o", alpha=0.5, label=task2, markersize=10)
+    plt.legend(loc="best")
+    save_fig(os.path.join(exp_path, f"{task1}_{task2}.png"))
 
 
 
