@@ -18,3 +18,23 @@ def l1_rate(act, scale):
 def l1_muscle_act(act, scale):
     l1 = scale * torch.mean(torch.sum(torch.abs(act), dim=-1))
     return l1
+
+def simple_dynamics(act, mrnn, weight=1e-2):
+
+    W_rec, W_rec_mask, W_rec_sign = mrnn.gen_w(mrnn.region_dict)
+    if mrnn.constrained:
+        W_rec = mrnn.apply_dales_law(W_rec, W_rec_mask, W_rec_sign)
+
+    if mrnn.activation_name == "softplus":
+        derivative = 1 / (1 + torch.exp(-act))
+    elif mrnn.activation_name == "relu":
+        derivative = torch.where(act > 0, 1., 0.)
+    else:
+        raise ValueError("Not implemented for activation")
+
+    d_act = torch.mean(derivative, dim=(1, 0))
+
+    update = W_rec * d_act**2
+    update = weight * torch.norm(update)
+
+    return update

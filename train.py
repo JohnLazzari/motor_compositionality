@@ -8,7 +8,7 @@ import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from model import RNNPolicy, GRUPolicy
-from losses import l1_dist, l1_rate, l1_weight, l1_muscle_act
+from losses import l1_dist, l1_rate, l1_weight, l1_muscle_act, simple_dynamics
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 from utils import save_hp, create_dir
@@ -29,7 +29,8 @@ DEF_HP = {
     "save_iter": 500,
     "l1_rate": 0.001,
     "l1_weight": 0.001,
-    "l1_muscle_act": 0.01
+    "l1_muscle_act": 0.001,
+    "simple_dynamics_weight": 0.001
 }
 
 def do_eval(policy, hp):
@@ -160,6 +161,7 @@ def train_2link(model_path, model_file, hp=None):
         DlyFigure8,
         DlyFigure8Inv
     ]
+
     probs = [1/len(env_list)] * len(env_list)
 
     for batch in range(hp["epochs"]):
@@ -206,6 +208,7 @@ def train_2link(model_path, model_file, hp=None):
         loss += l1_rate(hs, hp["l1_rate"])
         loss += l1_weight(policy, hp["l1_weight"])
         loss += l1_muscle_act(muscle_acts, hp["l1_muscle_act"])
+        loss += simple_dynamics(hs, policy.mrnn, weight=hp["simple_dynamics_weight"])
         
         # backward pass & update weights
         optimizer.zero_grad() 

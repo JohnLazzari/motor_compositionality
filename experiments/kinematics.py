@@ -71,7 +71,7 @@ def plot_task_kinematics(model_name):
             # Access current axes and hide top/right spines
             plt.gca().spines['top'].set_visible(False)
             plt.gca().spines['right'].set_visible(False)
-            save_fig(os.path.join(exp_path, "scatter", f"{env}_speed{speed}_kinematics.eps"), eps=True)
+            save_fig(os.path.join(exp_path, "scatter", f"{env}_speed{speed}_kinematics.png"))
 
             # Plot x coordinate only 
             for i, xy in enumerate(trial_data["xy"]):
@@ -79,7 +79,7 @@ def plot_task_kinematics(model_name):
             # Access current axes and hide top/right spines
             plt.gca().spines['top'].set_visible(False)
             plt.gca().spines['right'].set_visible(False)
-            save_fig(os.path.join(exp_path, "xpos", f"{env}_speed{speed}_xpos.eps"), eps=True)
+            save_fig(os.path.join(exp_path, "xpos", f"{env}_speed{speed}_xpos.png"))
 
             # Plot y coordinate only 
             for i, xy in enumerate(trial_data["xy"]):
@@ -87,7 +87,7 @@ def plot_task_kinematics(model_name):
             # Access current axes and hide top/right spines
             plt.gca().spines['top'].set_visible(False)
             plt.gca().spines['right'].set_visible(False)
-            save_fig(os.path.join(exp_path, "ypos", f"{env}_speed{speed}_ypos.eps"), eps=True)
+            save_fig(os.path.join(exp_path, "ypos", f"{env}_speed{speed}_ypos.png"))
 
 
 
