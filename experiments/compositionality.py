@@ -9,32 +9,22 @@ from utils import load_hp, interpolate_trial
 import warnings
 warnings.filterwarnings("ignore")
 
-from train import train_2link
 import motornet as mn
 from model import RNNPolicy, GRUPolicy
 import torch
 import os
-from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
-from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
-from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
+from utils import load_hp, create_dir, save_fig, load_pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import config
-from analysis.clustering import Analysis
 import pickle
 from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
 import analysis.plot_utils as plot_utils
-from analysis.manifold import principal_angles, vaf_ratio
-import dPCA
-from dPCA import dPCA
 import tqdm as tqdm
-import itertools
 from sklearn.decomposition import PCA
-from losses import l1_dist
-import scipy
-from mRNNTorch.analysis import flow_field
 import matplotlib.patches as mpatches
 from exp_utils import _test, env_dict
+from pcs import _get_pcs
 
 
 def _epoch_pcs(model_name, epoch):
@@ -50,7 +40,7 @@ def _epoch_pcs(model_name, epoch):
 
     # Create a figure
     fig = plt.figure()
-    fig.set_size_inches(8, 4)
+    fig.set_size_inches(4, 4)
 
     # Add a 3D subplot
     ax = fig.add_subplot(111, projection="3d")
@@ -73,7 +63,7 @@ def _epoch_pcs(model_name, epoch):
     # Set labels for axes
     ax.set_xlabel(f'{epoch} PC 1')
     ax.set_ylabel(f'{epoch} PC 2')
-    plt.legend(handles=handles, loc='center left', bbox_to_anchor=(1.0, 0.5))
+    ax.set_zlabel(f'{epoch} PC 3')
     save_fig(os.path.join(exp_path, f"{epoch}_pcs.png"))
 
 

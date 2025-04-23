@@ -11,13 +11,16 @@ warnings.filterwarnings("ignore")
 
 import torch
 import os
-from utils import load_hp, create_dir, save_fig 
+from utils import load_hp, create_dir, save_fig, interpolate_trial
 import matplotlib.pyplot as plt
 import numpy as np
 import config
 import tqdm as tqdm
 from sklearn.decomposition import PCA
 from exp_utils import _test, env_dict
+
+""" The functions here are currently doing pca on each environment then plotting, this may change
+"""
 
 
 def _get_pcs(model_name, batch_size=8, epoch=None, use_reach_conds=True, speed_cond=5, delay_cond=1, noise=False):
@@ -172,6 +175,73 @@ def plot_pca2d(model_name):
 
 
 
+def plot_pca_speeds(model_name):
+
+    exp_path = f"results/{model_name}/pca"
+    create_dir(exp_path)
+
+    # kind of useless but whatever
+    speed_batches = []
+    speed_batch_lengths = []
+    for speed in range(10):
+        _, env_hs = _get_pcs(model_name, batch_size=1, speed_cond=speed)
+        speed_batch_lengths.append([env_h.shape[1] for env_h in env_hs])
+        speed_batches.append(env_hs)
+    
+    max_timestep = max(speed_batch_lengths)
+
+    for (env_data, env) in zip(interpolated_batches, env_dict):
+
+        speed_pca = PCA(n_components=2)
+        speed_pca.fit()
+
+        movement_start = 75 - 25
+        
+        # Get kinematics and activity in a center out setting
+        # On random and delay
+        colors = plt.cm.inferno(np.linspace(0, 1, env_data.shape[0])) 
+
+        # Create a figure
+        fig = plt.figure()
+        # Add a 3D subplot
+        ax = fig.add_subplot(111)
+
+        for i, h in enumerate(env_data):
+
+            # transform
+            h_proj = speed_pca.transform(h)
+            # Plot the 3D line
+            ax.plot(h_proj[:movement_start, 0], h_proj[:movement_start, 1], color=colors[i], linewidth=4, linestyle="dashed")
+            ax.plot(h_proj[movement_start:, 0], h_proj[movement_start:, 1], color=colors[i], linewidth=4)
+
+            # Start and end positions
+            ax.scatter(h_proj[0, 0], h_proj[0, 1], marker="^", color=colors[i], s=250, zorder=10)
+            ax.scatter(h_proj[-1, 0], h_proj[-1, 1], marker="X", color=colors[i], s=250, zorder=10)
+        
+        # No ticks or tick labels
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        # No axis spines (borders)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        # No axis labels
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+
+        # No grid
+        ax.grid(False)
+
+        # White background (optional, usually default)
+        fig.patch.set_facecolor('white')
+        ax.set_facecolor('white')
+
+        save_fig(os.path.join(exp_path, "2d", f"{env}_tg_trajectory.png"))
+
+
+
+
 
 if __name__ == "__main__":
 
@@ -183,5 +253,7 @@ if __name__ == "__main__":
         plot_pca2d(args.model_name) 
     elif args.experiment == "plot_pca3d":
         plot_pca3d(args.model_name) 
+    elif args.experiment == "plot_pca_speeds":
+        plot_pca_speeds(args.model_name) 
     else:
         raise ValueError("Experiment not in this file")

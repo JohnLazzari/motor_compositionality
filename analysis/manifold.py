@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore")
 
 
 
-def principal_angles(combinations):
+def principal_angles(combinations, combination_labels):
     """
         Perform manifold analysis (principle angles and VAF)
 
@@ -36,15 +36,15 @@ def principal_angles(combinations):
     """
     angles_dict = {}
 
-    for combination in combinations:
+    for i, combination in enumerate(combinations):
         
         # ------------------------------------ GET PRINCIPLE ANGLES
 
         pca1 = PCA()
         pca2 = PCA()
 
-        task1_data = trial_data_envs[combination[0]].reshape((-1, trial_data_envs[combination[0]].shape[-1])).numpy()
-        task2_data = trial_data_envs[combination[1]].reshape((-1, trial_data_envs[combination[1]].shape[-1])).numpy()
+        task1_data = combination[0].reshape((-1, combination[0].shape[-1])).numpy()
+        task2_data = combination[1].reshape((-1, combination[1].shape[-1])).numpy()
 
         pca1.fit(task1_data)
         pca2.fit(task2_data)
@@ -56,7 +56,7 @@ def principal_angles(combinations):
         inner_prod_mat = pca1_comps @ pca2_comps.T # Should be m x m
         U, s, Vh = np.linalg.svd(inner_prod_mat)
         angles = np.degrees(np.arccos(s))
-        angles_dict[combination] = angles
+        angles_dict[combination_labels[i]] = angles
 
     # ------------------------------------ PLOTTING
 
@@ -64,29 +64,44 @@ def principal_angles(combinations):
 
 
 
-def vaf_ratio(combinations):
+def vaf_ratio(combinations, hid_size):
 
     vaf_ratio_list = []
     vaf_ratio_list_control = []
 
+    """
     # Create a random manifold as a control
     random_bases = np.empty(shape=(5000, 256, 256))
     for basis in range(5000):
-        random_bases[basis] = random_orthonormal_basis(hp["hid_size"]).T
+        random_bases[basis] = random_orthonormal_basis(hid_size).T
+    """
 
     for combination in combinations:
         
         pca1 = PCA()
         pca2 = PCA()
 
-        task1_data = trial_data_envs[combination[0]].reshape((-1, trial_data_envs[combination[0]].shape[-1])).numpy()
-        task2_data = trial_data_envs[combination[1]].reshape((-1, trial_data_envs[combination[1]].shape[-1])).numpy()
+        task1_data = combination[0].reshape((-1, combination[0].shape[-1])).numpy()
+        task2_data = combination[1].reshape((-1, combination[1].shape[-1])).numpy()
 
         pca1.fit(task1_data)
         pca2.fit(task2_data)
 
         pca1_comps = pca1.components_[:12]
         pca2_comps = pca2.components_[:12]
+
+        #------------------------------------- PUT TO DEVICES 
+
+        """
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        task1_data = torch.tensor(task1_data, dtype=torch.float32).to(device)
+        task2_data = torch.tensor(task2_data, dtype=torch.float32).to(device)
+
+        pca1_comps = torch.tensor(pca1_comps, dtype=torch.float32).to(device)
+        pca2_comps = torch.tensor(pca2_comps, dtype=torch.float32).to(device)
+        """
+
+        #random_bases = torch.tensor(random_bases, dtype=torch.float32).to(device)
 
         # ------------------------------------ TRUE ACROSS AND WITHIN TASK VAFs
 
@@ -103,6 +118,7 @@ def vaf_ratio(combinations):
 
         # ------------------------------------ CONTROL ACROSS TASK VAFs
 
+        """
         # Get random VAFs
         across_task_vaf = (random_bases[:, :12, :] @ task1_data.T).var(axis=2).sum(axis=1) / task1_data.var(axis=0).sum()
         vaf_ratio_list_control.append(np.percentile(across_task_vaf, 90) / within_task_vaf_task1)
@@ -110,5 +126,6 @@ def vaf_ratio(combinations):
         # Get random VAFs
         across_task_vaf = (random_bases[:, :12, :] @ task2_data.T).var(axis=2).sum(axis=1) / task2_data.var(axis=0).sum()
         vaf_ratio_list_control.append(np.percentile(across_task_vaf, 90) / within_task_vaf_task2)
-    
-    return vaf_ratio_list, vaf_ratio_list_control
+        """
+
+    return vaf_ratio_list

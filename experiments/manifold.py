@@ -42,7 +42,6 @@ def _principal_angles(model_name, system, comparison):
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
     exp_path = f"results/{model_name}/pc_angles"
-    hp = load_hp(model_path)
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
@@ -50,35 +49,46 @@ def _principal_angles(model_name, system, comparison):
 
     if system == "neural":
         mode = "h"
-    elif sysetm == "muscle":
+    elif system == "muscle":
         mode = "muscle_acts"
     else:
         raise ValueError("Not a valid system")
 
     if comparison == "task":
 
-        trial_data_envs = {}
+        trial_data_mode = {}
+        combinations = []
         for env in env_dict:
             trial_data = _test(model_path, model_file, options, env=env_dict[env])
-            trial_data_envs[env] = trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:]
+            trial_data_mode[env] = trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:]
         # Get all unique pairs of unit activity across tasks
-        combinations = list(itertools.combinations(trial_data_envs, 2))
+        combination_labels = list(itertools.combinations(trial_data_mode, 2))
+        for combination_label in combination_labels:
+            combinations.append((
+                trial_data_mode[combination_label[0]],
+                trial_data_mode[combination_label[1]]
+            ))
 
     elif comparison == "epoch":
 
         combinations = []
+        combination_labels = []
         for env in env_dict:
             trial_data = _test(model_path, model_file, options, env=env_dict[env])
+            combination_labels.append(env)
             combinations.append((
-                trial_data["h"][:, :trial_data["epoch_bounds"]["delay"][0]], 
-                trial_data["h"][:, trial_data["epoch_bounds"]["delay"][0]:]
+                trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:trial_data["epoch_bounds"]["delay"][1]], 
+                trial_data[mode][:, trial_data["epoch_bounds"]["delay"][1]:]
             ))
 
-    angles_dict = principal_angles(combinations)
+    angles_dict = principal_angles(combinations, combination_labels)
     
     for angles in angles_dict:
         plt.plot(angles_dict[angles], label=angles)
-    save_fig(os.path.join(exp_path, f"principal_angles.png"))
+    # Access current axes and hide top/right spines
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    save_fig(os.path.join(exp_path, f"{system}_{comparison}_principal_angles.png"))
 
 
 
@@ -96,19 +106,25 @@ def _vaf_ratio(model_name, system, comparison):
 
     if system == "neural":
         mode = "h"
-    elif sysetm == "muscle":
+    elif system == "muscle":
         mode = "muscle_acts"
     else:
         raise ValueError("Not a valid system")
 
     if comparison == "task":
 
-        trial_data_envs = {}
+        trial_data_mode = {}
+        combinations = []
         for env in env_dict:
             trial_data = _test(model_path, model_file, options, env=env_dict[env])
-            trial_data_envs[env] = trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:]
+            trial_data_mode[env] = trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:]
         # Get all unique pairs of unit activity across tasks
-        combinations = list(itertools.combinations(trial_data_envs, 2))
+        combination_labels = list(itertools.combinations(trial_data_mode, 2))
+        for combination_label in combination_labels:
+            combinations.append((
+                trial_data_mode[combination_label[0]],
+                trial_data_mode[combination_label[1]]
+            ))
 
     elif comparison == "epoch":
 
@@ -120,14 +136,18 @@ def _vaf_ratio(model_name, system, comparison):
                 trial_data["h"][:, trial_data["epoch_bounds"]["delay"][0]:]
             ))
 
-    vaf_ratio_list, vaf_ratio_list_control = vaf_ratio(combinations)
+    vaf_ratio_list = vaf_ratio(combinations, hp["hid_size"])
     
-    bins = np.linspace(0, 1, 50)
+    bins = np.linspace(0, 1, 25)
     weights = np.ones_like(vaf_ratio_list) * 100 / len(vaf_ratio_list)
     plt.hist(vaf_ratio_list, bins=bins, weights=weights, color="purple")
-    plt.hist(vaf_ratio_list_control, bins=bins, weights=weights, color="grey")
+    #plt.hist(vaf_ratio_list_control, bins=bins, weights=weights, color="grey")
     plt.xlim(0, 1)
-    save_fig(os.path.join(exp_path, "neural_vaf_ratio.png"))
+
+    # Access current axes and hide top/right spines
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    save_fig(os.path.join(exp_path, f"{system}_{comparison}_vaf_ratio.png"))
 
 
 
@@ -214,14 +234,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Principle Angles
-    if args.experiment == "neural_principle_angles_task":
-        neural_principle_angles_task(args.model_name) 
-    elif args.experiment == "muscle_principle_angles_task":
-        muscle_principle_angles_task(args.model_name) 
-    elif args.experiment == "neural_principle_angles_epoch":
-        neural_principle_angles_epoch(args.model_name) 
-    elif args.experiment == "muscle_principle_angles_epoch":
-        muscle_principle_angles_epoch(args.model_name) 
+    if args.experiment == "neural_principal_angles_task":
+        neural_principal_angles_task(args.model_name) 
+    elif args.experiment == "muscle_principal_angles_task":
+        muscle_principal_angles_task(args.model_name) 
+    elif args.experiment == "neural_principal_angles_epoch":
+        neural_principal_angles_epoch(args.model_name) 
+    elif args.experiment == "muscle_principal_angles_epoch":
+        muscle_principal_angles_epoch(args.model_name) 
 
     # VAF
     elif args.experiment == "neural_vaf_ratio_task":

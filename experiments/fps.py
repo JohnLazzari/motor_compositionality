@@ -165,7 +165,7 @@ def plot_fps(model_name):
             for cond, (unique_fps, state_traj) in enumerate(zip(all_condition_fps, all_condition_trajs)):
                 fig = plot_utils.plot_fps(
                     unique_fps, 
-                    pca_traj=all_condition_trajs[:, 25:], 
+                    pca_traj=all_condition_trajs[:, plot_start_time:plot_stop_time], 
                     state_traj=state_traj[None, ...], 
                     plot_start_time=plot_start_time, 
                     plot_stop_time=plot_stop_time, 
