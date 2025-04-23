@@ -47,11 +47,11 @@ def compute_fps(model_name):
 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "delay_cond": 1, "speed_cond": 5}
+    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "delay_cond": 2, "speed_cond": 5}
 
     hp = load_hp(model_path)
     
-    device = "cpu"
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
 
     # Loading in model
@@ -85,35 +85,37 @@ def compute_fps(model_name):
         '''Fixed point finder hyperparameters. See FixedPointFinder.py for detailed
         descriptions of available hyperparameters.'''
         fpf_hps = {
-            'max_iters': 250,
+            'max_iters': 500,
             'lr_init': 1.,
             'outlier_distance_scale': 10.0,
             'verbose': False, 
             'super_verbose': False,
-            'tol_unique': 2,
+            'tol_unique': 1,
             'do_compute_jacobians': False}
         
         env_fps_list = []
-        for b, condition in enumerate(trial_data["h"]):
-            for t, timepoint in enumerate(condition):
-                if t % 10 == 0:
+        for t in range(0, trial_data["h"].shape[1], 10):
+            condition_fps_list = []
+            for c, condition_t in enumerate(trial_data["h"][:, t, :]):
 
-                    print(f"Env: {env},  Condition: {b},  Timepoint: {t}")
+                print(f"Env: {env},  Condition: {c},  Timepoint: {t}")
 
-                    # Setup the fixed point finder
-                    fpf = FixedPointFinder(policy.mrnn, **fpf_hps)
+                # Setup the fixed point finder
+                fpf = FixedPointFinder(policy.mrnn, **fpf_hps)
 
-                    '''Draw random, noise corrupted samples of those state trajectories
-                    to use as initial states for the fixed point optimizations.'''
-                    initial_states = fpf.sample_states(timepoint[None, None, :],
-                        n_inits=N_INITS,
-                        noise_scale=NOISE_SCALE)
+                '''Draw random, noise corrupted samples of those state trajectories
+                to use as initial states for the fixed point optimizations.'''
+                initial_states = fpf.sample_states(condition_t[None, None, :],
+                    n_inits=N_INITS,
+                    noise_scale=NOISE_SCALE)
 
-                    # Run the fixed point finder
-                    unique_fps, all_fps = fpf.find_fixed_points(initial_states, inputs=trial_data["obs"][b, t:t+1, :])
+                # Run the fixed point finder
+                unique_fps, all_fps = fpf.find_fixed_points(initial_states, inputs=trial_data["obs"][c, t:t+1, :])
 
-                    # Add fixed points and their info to dict
-                    env_fps_list.append({"fps": unique_fps, "t": t, "condition": b, "state_traj": condition})
+                # Add fixed points and their info to dict
+                condition_fps_list.append({"fps": unique_fps, "state_traj": trial_data["h"][c, ...], "t": t})
+
+            env_fps_list.append(condition_fps_list)
 
         # Save all fixed points for environment
         env_fps[env] = env_fps_list
@@ -129,7 +131,6 @@ def compute_fps(model_name):
 
 
 
-# TODO make this much better
 def plot_fps(model_name):
 
     model_path = f"checkpoints/{model_name}"
@@ -140,44 +141,41 @@ def plot_fps(model_name):
 
     colors = plt.cm.inferno(np.linspace(0, 1, 8)) 
 
-    half_envs = [
-        "DlyHalfReach", 
-        "DlyHalfCircleClk", 
-        "DlyHalfCircleCClk", 
-        "DlySinusoid", 
-        "DlySinusoidInv",
-    ]
-    full_envs = [
-        "DlyFullReach",
-        "DlyFullCircleClk",
-        "DlyFullCircleCClk",
-        "DlyFigure8",
-        "DlyFigure8Inv"
-    ]
-
     for env in fps:
-        if env in half_envs:
-            timepoints = [150]
-        elif env in full_envs:
-            timepoints = [150]
+        # This should now be a list of lists with timepoints nested lists and eaach nested list containing 8 (condition) dicts
         env_fps = fps[env]
-        for i, t in enumerate(timepoints):
-            all_condition_fps = []
-            all_condition_trajs = []
-            for fp in env_fps:
-                if fp["t"] == t:
-                    all_condition_fps.append(fp["fps"])
-                    all_condition_trajs.append(fp["state_traj"])
-            
-            all_condition_trajs = torch.stack(all_condition_trajs)
+        for t, timepoint in enumerate(env_fps):
+            # timepoint is a list containing conditions fps dicts
+            true_t = t * 10
+            # This will hold conditions fps objects
+            all_condition_fps = [condition["fps"] for condition in timepoint]
+            # This will hold the state trajectory for each condition as tensor (conditions, time, n)
+            all_condition_trajs = torch.stack([condition["state_traj"] for condition in timepoint])
             save_name = f"{env}_t{t}_fps.png"
             # Visualize identified fixed points with overlaid RNN state trajectories
             # All visualized in the 3D PCA space fit the the example RNN states.
-            start_traj = 0 if i == 0 else timepoints[i-1]
-            end_traj = t
+            if true_t <= 100:
+                plot_start_time = 25
+                plot_stop_time = 100
+            else:
+                plot_start_time = 100
+                plot_stop_time = None
+
             fig=None
             for cond, (unique_fps, state_traj) in enumerate(zip(all_condition_fps, all_condition_trajs)):
-                fig = plot_utils.plot_fps(unique_fps, pca_traj=all_condition_trajs, state_traj=state_traj[None, ...], plot_start_time=start_traj, plot_stop_time=end_traj, fig=fig, traj_color=colors[cond])
+                fig = plot_utils.plot_fps(
+                    unique_fps, 
+                    pca_traj=all_condition_trajs[:, 25:], 
+                    state_traj=state_traj[None, ...], 
+                    plot_start_time=plot_start_time, 
+                    plot_stop_time=plot_stop_time, 
+                    fig=fig, 
+                    traj_color=colors[cond], 
+                    stable_color=colors[cond]
+                )
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
             save_fig(exp_path + "/" + save_name)
 
 

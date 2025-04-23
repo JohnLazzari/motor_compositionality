@@ -4,36 +4,16 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
-from utils import load_hp, interpolate_trial
-
 import warnings
 warnings.filterwarnings("ignore")
 
-from train import train_2link
-import motornet as mn
-from model import RNNPolicy, GRUPolicy
 import torch
 import os
-from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
-from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
-from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
+from utils import create_dir, save_fig
 import matplotlib.pyplot as plt
 import numpy as np
 import config
-from analysis.clustering import Analysis
-import pickle
-from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
-import analysis.plot_utils as plot_utils
-from analysis.manifold import principal_angles, vaf_ratio
-import dPCA
-from dPCA import dPCA
 import tqdm as tqdm
-import itertools
-from sklearn.decomposition import PCA
-from losses import l1_dist
-import scipy
-from mRNNTorch.analysis import flow_field
-import matplotlib.patches as mpatches
 from exp_utils import _test, env_dict
 
 def plot_psth(model_name):
@@ -71,7 +51,10 @@ def plot_psth(model_name):
                 plt.plot(torch.mean(h, dim=-1)[delay:], color=colors[i], linewidth=4)
                 plt.axvline(mov-delay, linestyle="dashed", color="grey")
                 plt.axvline(hold-delay, linestyle="dashed", color="grey")
-            save_fig(os.path.join(exp_path, f"{env}_speed{speed}_tg_trajectory.png"))
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, f"{env}_speed{speed}_tg_trajectory.eps"), eps=True)
 
 
 

@@ -21,6 +21,7 @@ def plot_fps(fps,
     plot_stop_time=None,
     mode_scale=0.25,
     traj_color="black",
+    stable_color="black",
     marker="o",
     fig=None):
 
@@ -144,6 +145,7 @@ def plot_fps(fps,
             fps[init_idx],
             pca,
             stable_marker=marker,
+            stable_color=stable_color,
             scale=mode_scale,
             alpha=0.5)
 

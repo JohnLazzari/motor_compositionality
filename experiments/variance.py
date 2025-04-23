@@ -9,31 +9,13 @@ from utils import load_hp, interpolate_trial
 import warnings
 warnings.filterwarnings("ignore")
 
-from train import train_2link
-import motornet as mn
-from model import RNNPolicy, GRUPolicy
 import torch
 import os
-from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
-from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
-from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
-import matplotlib.pyplot as plt
-import numpy as np
+from utils import load_hp, interpolate_trial
 import config
 from analysis.clustering import Analysis
 import pickle
-from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
-import analysis.plot_utils as plot_utils
-from analysis.manifold import principal_angles, vaf_ratio
-import dPCA
-from dPCA import dPCA
 import tqdm as tqdm
-import itertools
-from sklearn.decomposition import PCA
-from losses import l1_dist
-import scipy
-from mRNNTorch.analysis import flow_field
-import matplotlib.patches as mpatches
 from exp_utils import _test, env_dict
 
 def variance_by_rule(model_name):
