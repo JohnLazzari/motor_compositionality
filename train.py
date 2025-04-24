@@ -206,10 +206,10 @@ def train_2link(model_path, model_file, hp=None):
 
         # Implement loss function
         loss = l1_dist(xy, tg)  # L1 loss on position
-        loss += l1_rate(hs[:, epoch_bounds["stable"][1]:], hp["l1_rate"])
+        loss += l1_rate(hs)
         loss += l1_weight(policy, hp["l1_weight"])
-        loss += l1_muscle_act(muscle_acts[:, epoch_bounds["stable"][1]:], hp["l1_muscle_act"])
-        loss += simple_dynamics(hs[:, epoch_bounds["stable"][1]:], policy.mrnn, weight=hp["simple_dynamics_weight"])
+        loss += l1_muscle_act(muscle_acts, hp["l1_muscle_act"])
+        loss += simple_dynamics(hs, policy.mrnn, weight=hp["simple_dynamics_weight"])
         
         # backward pass & update weights
         optimizer.zero_grad() 
@@ -336,10 +336,10 @@ def load_prev_training(model_path, model_file):
 
         # Implement loss function
         loss = l1_dist(xy, tg)  # L1 loss on position
-        loss += l1_rate(hs[:, epoch_bounds["stable"][1]:], hp["l1_rate"])
+        loss += l1_rate(hs)
         loss += l1_weight(policy, hp["l1_weight"])
-        loss += l1_muscle_act(muscle_acts[:, epoch_bounds["stable"][1]:], hp["l1_muscle_act"])
-        loss += simple_dynamics(hs[:, epoch_bounds["stable"][1]:], policy.mrnn, weight=hp["simple_dynamics_weight"])
+        loss += l1_muscle_act(muscle_acts, hp["l1_muscle_act"])
+        loss += simple_dynamics(hs, policy.mrnn, weight=hp["simple_dynamics_weight"])
         
         # backward pass & update weights
         optimizer.zero_grad() 
