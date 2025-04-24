@@ -78,7 +78,7 @@ def _principal_angles(model_name, system, comparison):
             combination_labels.append(env)
             combinations.append((
                 trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:trial_data["epoch_bounds"]["delay"][1]], 
-                trial_data[mode][:, trial_data["epoch_bounds"]["delay"][1]:]
+                trial_data[mode][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
             ))
 
     angles_dict = principal_angles(combinations, combination_labels)

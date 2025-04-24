@@ -7,7 +7,7 @@ sys.path.insert(0, str(project_root))
 import warnings
 warnings.filterwarnings("ignore")
 
-from train import train_2link
+from train import train_2link, load_prev_training
 import config
 import tqdm as tqdm
 
@@ -108,6 +108,10 @@ def train_gru1024():
     # leave hp as default
     train_2link(model_path, model_file, hp=hp)
 
+def continue_training(model_name):
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    load_prev_training(model_path, model_file)
 
 
 
@@ -141,5 +145,7 @@ if __name__ == "__main__":
         train_gru512()
     elif args.experiment == "train_gru1024":
         train_gru1024()
+    elif args.experiment == "continue_training":
+        continue_training(args.model_name)
     else:
         raise ValueError("Experiment not in this file")

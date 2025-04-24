@@ -40,7 +40,7 @@ class DlyHalfReach(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -161,8 +161,6 @@ class DlyHalfReach(env.Environment):
         else:
             self.movement_time = movement_times[speed_cond]
 
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
-
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
             "stable": (0, self.stable_time),
@@ -170,6 +168,11 @@ class DlyHalfReach(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 150) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -274,7 +277,7 @@ class DlyHalfCircleClk(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -366,8 +369,6 @@ class DlyHalfCircleClk(env.Environment):
         else:
             self.movement_time = movement_times[speed_cond]
 
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
-
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
             "stable": (0, self.stable_time),
@@ -375,6 +376,11 @@ class DlyHalfCircleClk(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 150) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -488,7 +494,7 @@ class DlyHalfCircleCClk(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -580,8 +586,6 @@ class DlyHalfCircleCClk(env.Environment):
         else:
             self.movement_time = movement_times[speed_cond]
 
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
-
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
             "stable": (0, self.stable_time),
@@ -589,6 +593,11 @@ class DlyHalfCircleCClk(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 150) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -701,7 +710,7 @@ class DlySinusoid(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -793,8 +802,6 @@ class DlySinusoid(env.Environment):
         else:
             self.movement_time = movement_times[speed_cond]
 
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
-
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
             "stable": (0, self.stable_time),
@@ -802,6 +809,11 @@ class DlySinusoid(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 150) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -917,7 +929,7 @@ class DlySinusoidInv(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -1009,8 +1021,6 @@ class DlySinusoidInv(env.Environment):
         else:
             self.movement_time = movement_times[speed_cond]
 
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 150), dtype=th.float32).repeat(batch_size, 1)
-
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
             "stable": (0, self.stable_time),
@@ -1018,6 +1028,11 @@ class DlySinusoidInv(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 150) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -1130,7 +1145,7 @@ class DlyFullReach(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -1223,7 +1238,6 @@ class DlyFullReach(env.Environment):
             self.movement_time = movement_times[speed_cond]
 
         self.half_movement_time = int(self.movement_time/2)
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size ,1)
 
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
@@ -1232,6 +1246,11 @@ class DlyFullReach(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 300) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -1343,7 +1362,7 @@ class DlyFullCircleClk(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -1436,7 +1455,6 @@ class DlyFullCircleClk(env.Environment):
             self.movement_time = movement_times[speed_cond]
 
         self.half_movement_time = int(self.movement_time/2)
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
 
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
@@ -1445,6 +1463,11 @@ class DlyFullCircleClk(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 300) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -1556,7 +1579,7 @@ class DlyFullCircleCClk(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -1649,7 +1672,6 @@ class DlyFullCircleCClk(env.Environment):
             self.movement_time = movement_times[speed_cond]
 
         self.half_movement_time = int(self.movement_time/2)
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
 
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
@@ -1658,6 +1680,11 @@ class DlyFullCircleCClk(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 300) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -1769,7 +1796,7 @@ class DlyFigure8(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -1862,7 +1889,6 @@ class DlyFigure8(env.Environment):
             self.movement_time = movement_times[speed_cond]
 
         self.half_movement_time = int(self.movement_time/2)
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
 
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
@@ -1871,6 +1897,11 @@ class DlyFigure8(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 300) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
@@ -1988,7 +2019,7 @@ class DlyFigure8Inv(env.Environment):
 
         obs_as_list = [
         self.rule_input,
-        self.speed_scalar,
+        self.speed_scalar[:, t],
         self.go_cue[:, t],
         self.vis_inp[:, t],
         self.obs_buffer["vision"][0],
@@ -2081,7 +2112,6 @@ class DlyFigure8Inv(env.Environment):
             self.movement_time = movement_times[speed_cond]
 
         self.half_movement_time = int(self.movement_time/2)
-        self.speed_scalar = th.tensor(1 - (self.movement_time / 300), dtype=th.float32).repeat(batch_size, 1)
 
         # By here we should have the lengths of all task epochs
         self.epoch_bounds = {
@@ -2090,6 +2120,11 @@ class DlyFigure8Inv(env.Environment):
             "movement": (self.stable_time+self.delay_time, self.stable_time+self.delay_time+self.movement_time),
             "hold": (self.stable_time+self.delay_time+self.movement_time, self.stable_time+self.delay_time+self.movement_time+self.hold_time),
         }
+
+        self.speed_scalar = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+            1 - (self.movement_time / 300) * th.ones(size=(batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1], 1))
+        ], dim=1)
 
         # Set duration
         self.max_ep_duration = self.epoch_bounds["hold"][1] - 1

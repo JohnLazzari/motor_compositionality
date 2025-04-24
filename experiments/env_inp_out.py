@@ -118,7 +118,7 @@ def plot_task_input_output(model_name):
             ax[0].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
             ax[0].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
 
-            ax[1].plot(cur_env.speed_scalar[batch].unsqueeze(0).repeat(cur_env.max_ep_duration, 1), color="blue")
+            ax[1].plot(cur_env.speed_scalar[batch], color="blue")
             ax[1].spines['top'].set_visible(False)
             ax[1].spines['right'].set_visible(False)
             ax[1].spines['bottom'].set_visible(False)

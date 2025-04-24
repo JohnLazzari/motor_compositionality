@@ -24,7 +24,46 @@ import tqdm as tqdm
 from sklearn.decomposition import PCA
 import matplotlib.patches as mpatches
 from exp_utils import _test, env_dict
-from pcs import _get_pcs
+
+
+def _get_pcs(model_name, batch_size=8, epoch=None, use_reach_conds=True, speed_cond=5, delay_cond=1, noise=False):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    hp = load_hp(model_path)
+
+    if use_reach_conds:
+        reach_conds = torch.arange(0, 32, int(32 / batch_size))
+    else:
+        reach_conds = None
+
+    options = {
+        "batch_size": batch_size, 
+        "reach_conds": reach_conds, 
+        "speed_cond": speed_cond, 
+        "delay_cond": delay_cond
+    }
+
+    env_hs = []
+    for env in env_dict:
+
+        trial_data = _test(model_path, model_file, options, env=env_dict[env], noise=noise)
+
+        if epoch == "delay":
+            env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["delay"][1]-1].unsqueeze(1))
+        elif epoch == "stable":
+            env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["stable"][1]-1].unsqueeze(1))
+        elif epoch == "movement":
+            env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["movement"][1]-1].unsqueeze(1))
+        else:
+            raise ValueError("not valid epoch")
+
+    pca_3d = PCA(n_components=3)
+    pca_3d.fit(torch.cat(env_hs, dim=1).reshape((-1, hp["hid_size"])))
+
+    return pca_3d, env_hs
+
+
 
 
 def _epoch_pcs(model_name, epoch):
