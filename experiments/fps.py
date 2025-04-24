@@ -131,7 +131,7 @@ def compute_fps(model_name):
 
 
 
-def plot_fps(model_name):
+def _plot_fps(model_name, dims):
 
     model_path = f"checkpoints/{model_name}"
     load_name = os.path.join(model_path, "model_fps.pkl")
@@ -165,6 +165,7 @@ def plot_fps(model_name):
             for cond, (unique_fps, state_traj) in enumerate(zip(all_condition_fps, all_condition_trajs)):
                 fig = plot_utils.plot_fps(
                     unique_fps, 
+                    dims=dims,
                     pca_traj=all_condition_trajs[:, plot_start_time:plot_stop_time], 
                     state_traj=state_traj[None, ...], 
                     plot_start_time=plot_start_time, 
@@ -176,9 +177,15 @@ def plot_fps(model_name):
             # Access current axes and hide top/right spines
             plt.gca().spines['top'].set_visible(False)
             plt.gca().spines['right'].set_visible(False)
-            save_fig(exp_path + "/" + save_name)
+            save_fig(os.path.join(exp_path, f"{dims}d", save_name))
 
 
+
+
+def plot_fps_2d(model_name):
+    _plot_fps(model_name, 2)
+def plot_fps_3d(model_name):
+    _plot_fps(model_name, 3)
 
 
 
@@ -191,7 +198,9 @@ if __name__ == "__main__":
     
     if args.experiment == "compute_fps":
         compute_fps(args.model_name) 
-    elif args.experiment == "plot_fps":
-        plot_fps(args.model_name) 
+    elif args.experiment == "plot_fps_2d":
+        plot_fps_2d(args.model_name) 
+    elif args.experiment == "plot_fps_3d":
+        plot_fps_3d(args.model_name) 
     else:
         raise ValueError("Experiment not in this file")

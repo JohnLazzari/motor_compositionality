@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 def plot_fps(fps,
+    dims=2,
     pca_traj=None,
     state_traj=None,
     plot_batch_idx=None,
@@ -82,8 +83,6 @@ def plot_fps(fps,
         FIG_HEIGHT = 6 # inches
         fig = plt.figure(figsize=(FIG_WIDTH, FIG_HEIGHT),
             tight_layout=True)
-        plt.xlabel('PC 1', fontweight=FONT_WEIGHT)
-        plt.ylabel('PC 2', fontweight=FONT_WEIGHT)
 
     if pca_traj is not None:
         
@@ -105,7 +104,8 @@ def plot_fps(fps,
     n_states = fps.n_states
 
     if n_states >= 3:
-        pca = PCA(n_components=2)
+
+        pca = PCA(n_components=dims)
 
         if pca_traj is not None:
             pca_traj_btxd = np.reshape(pca_traj_bxtxd,
@@ -136,6 +136,7 @@ def plot_fps(fps,
                 z_idx = pca.transform(x_idx[plot_time_idx, :])
             else:
                 z_idx = x_idx[plot_time_idx, :]
+            
             plot_123d(z_idx, color=traj_color, linewidth=4)
             plt.scatter(z_idx[0, 0], z_idx[0, 1], marker="^", color=traj_color, s=250, zorder=10)
             plt.scatter(z_idx[-1, 0], z_idx[-1, 1], marker="X", color=traj_color, s=250, zorder=10)

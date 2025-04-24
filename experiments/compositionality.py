@@ -118,7 +118,7 @@ def movement_pcs(model_name):
 
 
 
-def _rule_interpolated_fps(model_name, task1, task2):
+def _rule_interpolated_fps(model_name, task1, task2, epoch):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -132,7 +132,7 @@ def _rule_interpolated_fps(model_name, task1, task2):
 
     hp = load_hp(model_path)
     
-    device = "cpu"
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
 
     # Loading in model
@@ -160,8 +160,12 @@ def _rule_interpolated_fps(model_name, task1, task2):
     trial_data1 = _test(model_path, model_file, options, env=env_dict[task1])
     trial_data2 = _test(model_path, model_file, options, env=env_dict[task2])
 
-    inp1 = trial_data1["obs"][:, trial_data1["epoch_bounds"]["movement"][0]]
-    inp2 = trial_data2["obs"][:, trial_data2["epoch_bounds"]["movement"][0]]
+    if epoch == "delay":
+        inp1 = trial_data1["obs"][:, trial_data1["epoch_bounds"]["delay"][1]-1]
+        inp2 = trial_data2["obs"][:, trial_data2["epoch_bounds"]["delay"][1]-1]
+    elif epoch == "movement":
+        inp1 = trial_data1["obs"][:, trial_data1["epoch_bounds"]["movement"][1]-1]
+        inp2 = trial_data2["obs"][:, trial_data2["epoch_bounds"]["movement"][1]-1]
 
     '''Fixed point finder hyperparameters. See FixedPointFinder.py for detailed
     descriptions of available hyperparameters.'''
@@ -188,9 +192,15 @@ def _rule_interpolated_fps(model_name, task1, task2):
 
             '''Draw random, noise corrupted samples of those state trajectories
             to use as initial states for the fixed point optimizations.'''
-            initial_states = fpf.sample_states(trial_data1["h"][i, trial_data1["epoch_bounds"]["movement"][0]][None, None, :],
-                n_inits=N_INITS,
-                noise_scale=NOISE_SCALE)
+
+            if epoch == "delay":
+                initial_states = fpf.sample_states(trial_data1["h"][i, trial_data1["epoch_bounds"]["delay"][1]-1][None, None, :],
+                    n_inits=N_INITS,
+                    noise_scale=NOISE_SCALE)
+            elif epoch == "movement":
+                initial_states = fpf.sample_states(trial_data1["h"][i, trial_data1["epoch_bounds"]["movement"][1]-1][None, None, :],
+                    n_inits=N_INITS,
+                    noise_scale=NOISE_SCALE)
 
             # Run the fixed point finder
             unique_fps, all_fps = fpf.find_fixed_points(initial_states, inputs=inp[None, :])
@@ -201,7 +211,7 @@ def _rule_interpolated_fps(model_name, task1, task2):
         cond_fps_list.append(fps_list)
 
     # Save all information of fps across tasks to pickle file
-    save_name = f'interpolated_fps_{task1}_{task2}'
+    save_name = f'interpolated_fps_{task1}_{task2}_{epoch}'
     fname = os.path.join(model_path, save_name + '.pkl')
     print('interpolated fps saved at {:s}'.format(fname))
     with open(fname, 'wb') as f:
@@ -209,18 +219,26 @@ def _rule_interpolated_fps(model_name, task1, task2):
 
 
 
+# Similar tasks
+def compute_interpolated_fps_halfcircleclk_halfcirclecclk_delay(model_name):
+    _rule_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk", "delay")
+def compute_interpolated_fps_halfcircleclk_halfcirclecclk_movement(model_name):
+    _rule_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk", "movement")
 
-def compute_interpolated_fps_halfcircleclk_halfcirclecclk(model_name):
-    _rule_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk")
+# dissimilar tasks
+def compute_interpolated_fps_halfreach_figure8inv_delay(model_name):
+    _rule_interpolated_fps(model_name, "DlyHalfReach", "DlyFigure8Inv", "delay")
+def compute_interpolated_fps_halfreach_figure8inv_movement(model_name):
+    _rule_interpolated_fps(model_name, "DlyHalfReach", "DlyFigure8Inv", "movement")
 
 
 
 
-def _plot_interpolated_fps(model_name, task1, task2):
+def _plot_interpolated_fps(model_name, task1, task2, epoch):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
-    load_name = os.path.join(model_path, f"interpolated_fps_{task1}_{task2}.pkl")
+    load_name = os.path.join(model_path, f"interpolated_fps_{task1}_{task2}_{epoch}.pkl")
     exp_path = f"results/{model_name}/compositionality/interpolated_fps"
 
     fps = load_pickle(load_name)
@@ -241,14 +259,14 @@ def _plot_interpolated_fps(model_name, task1, task2):
         save_name = f"cond_{i}_interp_fps.png"
 
         task1_pca = PCA(n_components=2)
-        task1_pca.fit(trial_data1["h"][i])
+        task1_pca.fit(trial_data1["h"][i, trial_data1["epoch_bounds"][f"{epoch}"][0]:trial_data1["epoch_bounds"][f"{epoch}"][1]])
 
         # Create figure and 3D axes
         fig = plt.figure(figsize=(4, 4))
         ax = fig.add_subplot(111, projection='3d')  # or projection='3d'
 
-        task1_h_reduced = task1_pca.transform(trial_data1["h"][i])
-        task2_h_reduced = task1_pca.transform(trial_data2["h"][i])
+        task1_h_reduced = task1_pca.transform(trial_data1["h"][i, trial_data1["epoch_bounds"][f"{epoch}"][0]:trial_data1["epoch_bounds"][f"{epoch}"][1]])
+        task2_h_reduced = task1_pca.transform(trial_data2["h"][i, trial_data2["epoch_bounds"][f"{epoch}"][0]:trial_data2["epoch_bounds"][f"{epoch}"][1]])
 
         ax.plot(np.zeros_like(task1_h_reduced[:, 0]), task1_h_reduced[:, 0], task1_h_reduced[:, 1], linewidth=4, color="skyblue")
         ax.plot(np.ones_like(task2_h_reduced[:, 0]), task2_h_reduced[:, 0], task2_h_reduced[:, 1], linewidth=4, color="purple")
@@ -270,13 +288,22 @@ def _plot_interpolated_fps(model_name, task1, task2):
                 ax.plot((j/20)*np.ones_like(zstar)[:, 0], zstar[:, 0], zstar[:, 1], marker='.', alpha=0.5, color=colors[j], markersize=12)
 
         ax.grid(False)
-        save_fig(os.path.join(exp_path, save_name))
+        save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", save_name))
 
 
 
 
-def plot_interpolated_fps_halfcircleclk_halfcirclecclk(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk")
+# Similar Tasks
+def plot_interpolated_fps_halfcircleclk_halfcirclecclk_delay(model_name):
+    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk", "delay")
+def plot_interpolated_fps_halfcircleclk_halfcirclecclk_movement(model_name):
+    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk", "movement")
+
+# dissimilar Tasks
+def plot_interpolated_fps_halfreach_figure8inv_delay(model_name):
+    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFigure8Inv", "delay")
+def plot_interpolated_fps_halfreach_figure8inv_movement(model_name):
+    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFigure8Inv", "movement")
 
 
 
@@ -319,8 +346,8 @@ def _two_task_variance_explained(model_name, task1, task2):
 
 def ve_halfreach_figure8inv(model_name):
     _two_task_variance_explained(model_name, "DlyHalfReach", "DlyFigure8Inv")
-def ve_halfcircleclk_fullcircleclk(model_name):
-    _two_task_variance_explained(model_name, "DlyHalfCircleClk", "DlyFullCircleClk")
+def ve_halfcircleclk_halfcirclecclk(model_name):
+    _two_task_variance_explained(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk")
 
 
 
@@ -371,14 +398,28 @@ if __name__ == "__main__":
     # Variance explained between task subspaces
     if args.experiment == "ve_halfreach_figure8inv":
         ve_halfreach_figure8inv(args.model_name)
-    elif args.experiment == "ve_halfcircleclk_fullcircleclk":
-        ve_halfcircleclk_fullcircleclk(args.model_name)
+    elif args.experiment == "ve_halfcircleclk_halfcirclecclk":
+        ve_halfcircleclk_halfcirclecclk(args.model_name)
 
-    # Interpolated fps
-    elif args.experiment == "compute_interpolated_fps_halfcircleclk_fullcircleclk":
-        compute_interpolated_fps_halfcircleclk_halfcirclecclk(args.model_name)
-    elif args.experiment == "plot_interpolated_fps_halfcircleclk_halfcirclecclk":
-        plot_interpolated_fps_halfcircleclk_halfcirclecclk(args.model_name)
+    # Compute Interpolated fps
+    elif args.experiment == "compute_interpolated_fps_halfcircleclk_halfcirclecclk_delay":
+        compute_interpolated_fps_halfcircleclk_halfcirclecclk_delay(args.model_name)
+    elif args.experiment == "compute_interpolated_fps_halfcircleclk_halfcirclecclk_movement":
+        compute_interpolated_fps_halfcircleclk_halfcirclecclk_movement(args.model_name)
+    elif args.experiment == "compute_interpolated_fps_halfreach_figure8inv_delay":
+        compute_interpolated_fps_halfreach_figure8inv_delay(args.model_name)
+    elif args.experiment == "compute_interpolated_fps_halfreach_figure8inv_movement":
+        compute_interpolated_fps_halfreach_figure8inv_movement(args.model_name)
+
+    # Plot Interpolated fps
+    elif args.experiment == "plot_interpolated_fps_halfcircleclk_halfcirclecclk_delay":
+        plot_interpolated_fps_halfcircleclk_halfcirclecclk_delay(args.model_name)
+    elif args.experiment == "plot_interpolated_fps_halfcircleclk_halfcirclecclk_movement":
+        plot_interpolated_fps_halfcircleclk_halfcirclecclk_movement(args.model_name)
+    elif args.experiment == "plot_interpolated_fps_halfreach_figure8inv_delay":
+        plot_interpolated_fps_halfreach_figure8inv_delay(args.model_name)
+    elif args.experiment == "plot_interpolated_fps_halfreach_figure8inv_movement":
+        plot_interpolated_fps_halfreach_figure8inv_movement(args.model_name)
 
     # Epoch pcs
     elif args.experiment == "stable_pcs":
