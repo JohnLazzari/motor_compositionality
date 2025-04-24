@@ -47,7 +47,7 @@ def _get_pcs(model_name, batch_size=8, epoch=None, use_reach_conds=True, speed_c
         trial_data = _test(model_path, model_file, options, env=env_dict[env], noise=noise)
 
         if epoch is None:
-            env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["delay"][0]:])
+            env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["movement"][0]:])
         elif epoch == "delay":
             env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["delay"][1]-1].unsqueeze(1))
         elif epoch == "stable":
@@ -92,27 +92,19 @@ def plot_pca3d(model_name):
             h_proj = pca_3d.transform(h)
 
             # Plot the 3D line
-            ax.plot(h_proj[:movement_start, 0], h_proj[:movement_start, 1], h_proj[:movement_start, 2], color=colors[i], linewidth=4, linestyle="dashed")
+            #ax.plot(h_proj[:movement_start, 0], h_proj[:movement_start, 1], h_proj[:movement_start, 2], color=colors[i], linewidth=4, linestyle="dashed")
             ax.plot(h_proj[movement_start:, 0], h_proj[movement_start:, 1], h_proj[movement_start:, 2], color=colors[i], linewidth=4)
 
             # Set labels for axes
             ax.set_title(f'{env} PCs')
 
             # Start and end points (start is triangle, end is x)
-            ax.scatter(h_proj[0, 0], h_proj[0, 1], h_proj[0, 2], marker="^", color=colors[i], s=250, zorder=10)
+            ax.scatter(h_proj[movement_start, 0], h_proj[movement_start, 1], h_proj[movement_start, 2], marker="^", color=colors[i], s=250, zorder=10)
             ax.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], marker="X", color=colors[i], s=250, zorder=10)
         
         # Set background to white
         fig.patch.set_facecolor('white')
         ax.set_facecolor('white')
-
-        # Remove 3D panes
-        ax.xaxis.pane.fill = False
-        ax.yaxis.pane.fill = False
-        ax.zaxis.pane.fill = False
-
-        # Remove axis lines ("spines")
-        ax._axis3don = False
 
         save_fig(os.path.join(exp_path, "3d", f"{env}_tg_trajectory.png"))
 
@@ -144,11 +136,11 @@ def plot_pca2d(model_name):
             # transform
             h_proj = pca_3d.transform(h)
             # Plot the 3D line
-            ax.plot(h_proj[:movement_start, 0], h_proj[:movement_start, 1], color=colors[i], linewidth=4, linestyle="dashed")
+            #ax.plot(h_proj[:movement_start, 0], h_proj[:movement_start, 1], color=colors[i], linewidth=4, linestyle="dashed")
             ax.plot(h_proj[movement_start:, 0], h_proj[movement_start:, 1], color=colors[i], linewidth=4)
 
             # Start and end positions
-            ax.scatter(h_proj[0, 0], h_proj[0, 1], marker="^", color=colors[i], s=250, zorder=10)
+            ax.scatter(h_proj[movement_start, 0], h_proj[movement_start, 1], marker="^", color=colors[i], s=250, zorder=10)
             ax.scatter(h_proj[-1, 0], h_proj[-1, 1], marker="X", color=colors[i], s=250, zorder=10)
         
         # No ticks or tick labels

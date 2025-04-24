@@ -54,7 +54,7 @@ def plot_psth(model_name):
             # Access current axes and hide top/right spines
             plt.gca().spines['top'].set_visible(False)
             plt.gca().spines['right'].set_visible(False)
-            save_fig(os.path.join(exp_path, f"{env}_speed{speed}_tg_trajectory.eps"), eps=True)
+            save_fig(os.path.join(exp_path, f"{env}_speed{speed}_tg_trajectory.png"))
 
 
 
