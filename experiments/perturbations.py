@@ -90,7 +90,7 @@ def feedback_ablation(model_name):
 
     go_mask = torch.ones(size=(options["batch_size"], 28))
     go_mask[11:12] = 0
-    feedback_masks["speed_scalar"] = go_mask
+    feedback_masks["go_cue"] = go_mask
 
     tg_mask = torch.ones(size=(options["batch_size"], 28))
     tg_mask[12:14] = 0
@@ -127,7 +127,7 @@ def feedback_ablation(model_name):
             change_loss_envs[i, j] = loss_change
 
     img = plt.imshow(change_loss_envs, vmin=-0.5, vmax=0.5, cmap="seismic")
-    plt.xticks(ticks=np.arange(0, 6), labels=[mask for mask in feedback_masks], rotation=45)
+    plt.xticks(ticks=np.arange(0, 7), labels=[mask for mask in feedback_masks], rotation=45)
     plt.yticks(ticks=np.arange(0, 10), labels=[env for env in env_dict], rotation=45)
     cbar = plt.colorbar(img)
     cbar.set_label('Change in Loss')

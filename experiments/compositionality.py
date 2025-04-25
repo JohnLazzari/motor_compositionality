@@ -26,7 +26,7 @@ import matplotlib.patches as mpatches
 from exp_utils import _test, env_dict
 
 
-def _get_pcs(model_name, batch_size=8, epoch=None, use_reach_conds=True, speed_cond=5, delay_cond=1, noise=False):
+def _get_pcs(model_name, batch_size=8, epoch=None, use_reach_conds=True, speed_cond=5, delay_cond=1, noise=False, system="neural"):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -44,34 +44,43 @@ def _get_pcs(model_name, batch_size=8, epoch=None, use_reach_conds=True, speed_c
         "delay_cond": delay_cond
     }
 
+    if system == "neural":
+        mode = "h"
+        size = hp["hid_size"]
+    elif system == "motor":
+        mode = "muscle_acts"
+        size = 6
+    else:
+        raise ValueError()
+
     env_hs = []
     for env in env_dict:
 
         trial_data = _test(model_path, model_file, options, env=env_dict[env], noise=noise)
 
         if epoch == "delay":
-            env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["delay"][1]-1].unsqueeze(1))
+            env_hs.append(trial_data[mode][:, trial_data["epoch_bounds"]["delay"][1]-1].unsqueeze(1))
         elif epoch == "stable":
-            env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["stable"][1]-1].unsqueeze(1))
+            env_hs.append(trial_data[mode][:, trial_data["epoch_bounds"]["stable"][1]-1].unsqueeze(1))
         elif epoch == "movement":
-            env_hs.append(trial_data["h"][:, trial_data["epoch_bounds"]["movement"][1]-1].unsqueeze(1))
+            env_hs.append(trial_data[mode][:, trial_data["epoch_bounds"]["movement"][1]-1].unsqueeze(1))
         else:
             raise ValueError("not valid epoch")
 
     pca_3d = PCA(n_components=3)
-    pca_3d.fit(torch.cat(env_hs, dim=1).reshape((-1, hp["hid_size"])))
+    pca_3d.fit(torch.cat(env_hs, dim=1).reshape((-1, size)))
 
     return pca_3d, env_hs
 
 
 
 
-def _epoch_pcs(model_name, epoch):
+def _epoch_pcs(model_name, epoch, system):
 
     exp_path = f"results/{model_name}/compositionality/pcs"
     create_dir(exp_path)
 
-    pca_3d, env_hs = _get_pcs(model_name, batch_size=256, use_reach_conds=False, epoch=epoch, noise=True)
+    pca_3d, env_hs = _get_pcs(model_name, batch_size=256, use_reach_conds=False, epoch=epoch, noise=True, system=system)
 
     # Get kinematics and activity in a center out setting
     # On random and delay
@@ -103,17 +112,24 @@ def _epoch_pcs(model_name, epoch):
     ax.set_xlabel(f'{epoch} PC 1')
     ax.set_ylabel(f'{epoch} PC 2')
     ax.set_zlabel(f'{epoch} PC 3')
-    save_fig(os.path.join(exp_path, f"{epoch}_pcs.png"))
+    save_fig(os.path.join(exp_path, f"{system}_{epoch}_pcs.png"))
 
 
 
 
-def stable_pcs(model_name):
-    _epoch_pcs(model_name, "stable")
-def delay_pcs(model_name):
-    _epoch_pcs(model_name, "delay")
-def movement_pcs(model_name):
-    _epoch_pcs(model_name, "movement")
+def stable_pcs_neural(model_name):
+    _epoch_pcs(model_name, "stable", "neural")
+def delay_pcs_neural(model_name):
+    _epoch_pcs(model_name, "delay", "neural")
+def movement_pcs_neural(model_name):
+    _epoch_pcs(model_name, "movement", "neural")
+
+def stable_pcs_motor(model_name):
+    _epoch_pcs(model_name, "stable", "motor")
+def delay_pcs_motor(model_name):
+    _epoch_pcs(model_name, "delay", "motor")
+def movement_pcs_motor(model_name):
+    _epoch_pcs(model_name, "movement", "motor")
 
 
 
@@ -422,11 +438,18 @@ if __name__ == "__main__":
         plot_interpolated_fps_halfreach_figure8inv_movement(args.model_name)
 
     # Epoch pcs
-    elif args.experiment == "stable_pcs":
-        stable_pcs(args.model_name)
-    elif args.experiment == "delay_pcs":
-        delay_pcs(args.model_name)
-    elif args.experiment == "movement_pcs":
-        movement_pcs(args.model_name)
+    elif args.experiment == "stable_pcs_neural":
+        stable_pcs_neural(args.model_name)
+    elif args.experiment == "delay_pcs_neural":
+        delay_pcs_neural(args.model_name)
+    elif args.experiment == "movement_pcs_neural":
+        movement_pcs_neural(args.model_name)
+
+    elif args.experiment == "stable_pcs_motor":
+        stable_pcs_motor(args.model_name)
+    elif args.experiment == "delay_pcs_motor":
+        delay_pcs_motor(args.model_name)
+    elif args.experiment == "movement_pcs_motor":
+        movement_pcs_motor(args.model_name)
     else:
         raise ValueError("Experiment not in this file")

@@ -23,7 +23,7 @@ from exp_utils import _test, env_dict
 """
 
 
-def _get_pcs(model_name, epoch, env, batch_size=8, speed_cond=5):
+def _get_pcs(model_name, epoch, env, system, batch_size=8, speed_cond=5):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -38,29 +38,36 @@ def _get_pcs(model_name, epoch, env, batch_size=8, speed_cond=5):
 
     trial_data = _test(model_path, model_file, options, env=env_dict[env])
 
+    if system == "neural":
+        mode = "h"
+        size = hp["hid_size"]
+    elif system == "muscle":
+        mode = "muscle_acts"
+        size = 6
+
     if epoch == "delay":
-        env_h = trial_data["h"][:, trial_data["epoch_bounds"]["delay"][0]:trial_data["epoch_bounds"]["delay"][1]]
+        env_h = trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:trial_data["epoch_bounds"]["delay"][1]]
     elif epoch == "movement":
-        env_h = trial_data["h"][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
+        env_h = trial_data[mode][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
     else:
         raise ValueError("not valid epoch")
 
-    pca_3d = PCA(n_components=3)
-    pca_3d.fit(env_h.reshape((-1, hp["hid_size"])))
+    pca_3d = PCA()
+    pca_3d.fit(env_h.reshape((-1, size)))
 
     return pca_3d, env_h
 
 
 
 
-def _plot_pca3d(model_name, epoch):
+def _plot_pca3d(model_name, epoch, system):
 
     exp_path = f"results/{model_name}/pca"
     create_dir(exp_path)
 
     for env in env_dict:
 
-        pca_3d, env_h = _get_pcs(model_name, epoch, env)
+        pca_3d, env_h = _get_pcs(model_name, epoch, env, system)
 
         # Get kinematics and activity in a center out setting
         # On random and delay
@@ -89,27 +96,41 @@ def _plot_pca3d(model_name, epoch):
         fig.patch.set_facecolor('white')
         ax.set_facecolor('white')
 
-        save_fig(os.path.join(exp_path, "3d", f"{env}_{epoch}_trajectory.png"))
+        save_fig(os.path.join(exp_path, "3d", system, f"{env}_{epoch}_trajectory.png"))
+
+
+        plt.rc('figure', figsize=(4, 6))
+        # Create a figure
+        fig = plt.figure()
+        # Add a 3D subplot
+        ax = fig.add_subplot(111)
+        ax.plot([np.sum(pca_3d.explained_variance_ratio_[:i]) for i in range(pca_3d.components_.shape[0])], marker='o', color="black", alpha=0.5, linewidth=4)
+        save_fig(os.path.join(exp_path, "3d", system, f"{env}_{epoch}_var"))
 
 
 
 
-def plot_pca3d_delay(model_name):
-    _plot_pca3d(model_name, "delay")
-def plot_pca3d_movement(model_name):
-    _plot_pca3d(model_name, "movement")
+def plot_neural_pca3d_delay(model_name):
+    _plot_pca3d(model_name, "delay", "neural")
+def plot_neural_pca3d_movement(model_name):
+    _plot_pca3d(model_name, "movement", "neural")
+
+def plot_motor_pca3d_delay(model_name):
+    _plot_pca3d(model_name, "delay", "muscle")
+def plot_motor_pca3d_movement(model_name):
+    _plot_pca3d(model_name, "movement", "muscle")
 
 
 
 
-def _plot_pca2d(model_name, epoch):
+def _plot_pca2d(model_name, epoch, system):
 
     exp_path = f"results/{model_name}/pca"
     create_dir(exp_path)
 
     for env in env_dict:
 
-        pca_3d, env_h = _get_pcs(model_name, epoch, env)
+        pca_3d, env_h = _get_pcs(model_name, epoch, env, system)
 
         # Get kinematics and activity in a center out setting
         # On random and delay
@@ -149,15 +170,28 @@ def _plot_pca2d(model_name, epoch):
         fig.patch.set_facecolor('white')
         ax.set_facecolor('white')
 
-        save_fig(os.path.join(exp_path, "2d", f"{env}_{epoch}_trajectory.png"))
+        save_fig(os.path.join(exp_path, "2d", system, f"{env}_{epoch}_trajectory.png"))
+
+        plt.rc('figure', figsize=(4, 6))
+        # Create a figure
+        fig = plt.figure()
+        # Add a 3D subplot
+        ax = fig.add_subplot(111)
+        ax.plot([np.sum(pca_3d.explained_variance_ratio_[:i]) for i in range(pca_3d.components_.shape[0])], marker='o', color="black", alpha=0.5, linewidth=4)
+        save_fig(os.path.join(exp_path, "3d", system, f"{env}_{epoch}_var"))
 
 
 
 
-def plot_pca2d_delay(model_name):
-    _plot_pca2d(model_name, "delay")
-def plot_pca2d_movement(model_name):
-    _plot_pca2d(model_name, "movement")
+def plot_neural_pca2d_delay(model_name):
+    _plot_pca2d(model_name, "delay", "neural")
+def plot_neural_pca2d_movement(model_name):
+    _plot_pca2d(model_name, "movement", "neural")
+
+def plot_motor_pca2d_delay(model_name):
+    _plot_pca2d(model_name, "delay", "muscle")
+def plot_motor_pca2d_movement(model_name):
+    _plot_pca2d(model_name, "movement", "muscle")
 
 
 
@@ -289,14 +323,24 @@ if __name__ == "__main__":
     parser = config.config_parser()
     args = parser.parse_args()
     
-    if args.experiment == "plot_pca2d_delay":
-        plot_pca2d_delay(args.model_name) 
-    elif args.experiment == "plot_pca2d_movement":
-        plot_pca2d_movement(args.model_name) 
-    elif args.experiment == "plot_pca3d_delay":
-        plot_pca3d_delay(args.model_name) 
-    elif args.experiment == "plot_pca3d_movement":
-        plot_pca3d_movement(args.model_name) 
+    if args.experiment == "plot_neural_pca2d_delay":
+        plot_neural_pca2d_delay(args.model_name) 
+    elif args.experiment == "plot_neural_pca2d_movement":
+        plot_neural_pca2d_movement(args.model_name) 
+    if args.experiment == "plot_motor_pca2d_delay":
+        plot_motor_pca2d_delay(args.model_name) 
+    elif args.experiment == "plot_motor_pca2d_movement":
+        plot_motor_pca2d_movement(args.model_name) 
+
+    elif args.experiment == "plot_neural_pca3d_delay":
+        plot_neural_pca3d_delay(args.model_name) 
+    elif args.experiment == "plot_neural_pca3d_movement":
+        plot_neural_pca3d_movement(args.model_name) 
+    elif args.experiment == "plot_motor_pca3d_delay":
+        plot_motor_pca3d_delay(args.model_name) 
+    elif args.experiment == "plot_motor_pca3d_movement":
+        plot_motor_pca3d_movement(args.model_name) 
+
     elif args.experiment == "plot_pca_speeds":
         plot_pca_speeds(args.model_name) 
     elif args.experiment == "plot_movement_vs_delay_space":

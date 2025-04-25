@@ -81,7 +81,7 @@ def _principal_angles(model_name, system, comparison):
                 trial_data[mode][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
             ))
 
-    angles_dict = principal_angles(combinations, combination_labels)
+    angles_dict = principal_angles(combinations, combination_labels, system)
     
     for angles in angles_dict:
         plt.plot(angles_dict[angles], label=angles)

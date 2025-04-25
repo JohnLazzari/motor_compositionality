@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore")
 
 
 
-def principal_angles(combinations, combination_labels):
+def principal_angles(combinations, combination_labels, mode):
     """
         Perform manifold analysis (principle angles and VAF)
 
@@ -49,8 +49,13 @@ def principal_angles(combinations, combination_labels):
         pca1.fit(task1_data)
         pca2.fit(task2_data)
 
-        pca1_comps = pca1.components_[:12]
-        pca2_comps = pca2.components_[:12]
+        if mode == "neural":
+            pca1_comps = pca1.components_[:12]
+            pca2_comps = pca2.components_[:12]
+        elif mode == "muscle":
+            pca1_comps = pca1.components_[:3]
+            pca2_comps = pca2.components_[:3]
+            
 
         # Get principle angles
         inner_prod_mat = pca1_comps @ pca2_comps.T # Should be m x m
