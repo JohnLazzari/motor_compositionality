@@ -12,6 +12,13 @@ import config
 import tqdm as tqdm
 
 
+def train_rnn256_softplus():
+    hp = {"hid_size": 256}
+    model_path = "checkpoints/rnn256_softplus_sd1e-3_ma1e-2"
+    model_file = "rnn256_softplus_sd1e-3_ma1e-2.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS")
+    # leave hp as default
+    train_2link(model_path, model_file, hp=hp)
 
 def train_rnn512_softplus():
     model_path = "checkpoints/rnn512_softplus"
@@ -19,14 +26,6 @@ def train_rnn512_softplus():
     print("TRAINING RNN WITH SOFTPLUS AND 512 UNITS")
     # leave hp as default
     train_2link(model_path, model_file)
-
-def train_rnn256_softplus():
-    hp = {"hid_size": 256}
-    model_path = "checkpoints/rnn256_softplus"
-    model_file = "rnn256_softplus.pth"
-    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
 
 def train_rnn1024_softplus():
     hp = {"hid_size": 1024}

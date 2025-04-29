@@ -79,18 +79,23 @@ def _plot_pca3d(model_name, epoch, system):
 
         for i, h in enumerate(env_h):
 
+            if i == 0:
+                alpha = 1
+            else:
+                alpha = 0.5
+
             # transform
             h_proj = pca_3d.transform(h)
 
             # Plot the 3D line
-            ax.plot(h_proj[:, 0], h_proj[:, 1], h_proj[:, 2], color=colors[i], linewidth=4)
+            ax.plot(h_proj[:, 0], h_proj[:, 1], h_proj[:, 2], color=colors[i], linewidth=4, alpha=alpha)
 
             # Set labels for axes
             ax.set_title(f'{env} PCs')
 
             # Start and end points (start is triangle, end is x)
-            ax.scatter(h_proj[0, 0], h_proj[0, 1], h_proj[0, 2], marker="^", color=colors[i], s=250, zorder=10)
-            ax.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], marker="X", color=colors[i], s=250, zorder=10)
+            ax.scatter(h_proj[0, 0], h_proj[0, 1], h_proj[0, 2], marker="^", color=colors[i], s=250, zorder=10, alpha=alpha)
+            ax.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], marker="X", color=colors[i], s=250, zorder=10, alpha=alpha)
         
         # Set background to white
         fig.patch.set_facecolor('white')
@@ -203,8 +208,8 @@ def plot_movement_vs_delay_space(model_name):
 
     for env in env_dict:
 
-        pca_mov, env_h_mov = _get_pcs(model_name, "movement", env)
-        pca_delay, env_h_delay = _get_pcs(model_name, "delay", env)
+        pca_mov, env_h_mov = _get_pcs(model_name, "movement", env, "neural")
+        pca_delay, env_h_delay = _get_pcs(model_name, "delay", env, "neural")
 
         all_h = torch.cat([env_h_delay, env_h_mov], dim=1)
 
@@ -327,7 +332,7 @@ if __name__ == "__main__":
         plot_neural_pca2d_delay(args.model_name) 
     elif args.experiment == "plot_neural_pca2d_movement":
         plot_neural_pca2d_movement(args.model_name) 
-    if args.experiment == "plot_motor_pca2d_delay":
+    elif args.experiment == "plot_motor_pca2d_delay":
         plot_motor_pca2d_delay(args.model_name) 
     elif args.experiment == "plot_motor_pca2d_movement":
         plot_motor_pca2d_movement(args.model_name) 

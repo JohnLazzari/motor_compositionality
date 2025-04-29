@@ -103,6 +103,7 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, n
     timesteps = 0
 
     trial_data["h"] = []
+    trial_data["x"] = []
     trial_data["action"] = []
     trial_data["muscle_acts"] = []
     trial_data["obs"] = []
@@ -130,6 +131,7 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, n
 
         # Save all information regarding episode step
         trial_data["h"].append(h.unsqueeze(1))  # trajectories
+        trial_data["x"].append(x.unsqueeze(1))  # trajectories
         trial_data["action"].append(action.unsqueeze(1))  # targets
         trial_data["obs"].append(obs.unsqueeze(1))  # targets
         trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories

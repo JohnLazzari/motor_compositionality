@@ -30,7 +30,7 @@ DEF_HP = {
     "l1_rate": 0.001,
     "l1_weight": 0.001,
     "l1_muscle_act": 0.01,
-    "simple_dynamics_weight": 0.0001
+    "simple_dynamics_weight": 0.0005
 }
 
 def do_eval(policy, hp):
@@ -206,7 +206,7 @@ def train_2link(model_path, model_file, hp=None):
 
         # Implement loss function
         loss = l1_dist(xy, tg)  # L1 loss on position
-        loss += l1_rate(hs)
+        loss += l1_rate(hs, hp["l1_rate"])
         loss += l1_weight(policy, hp["l1_weight"])
         loss += l1_muscle_act(muscle_acts, hp["l1_muscle_act"])
         loss += simple_dynamics(hs, policy.mrnn, weight=hp["simple_dynamics_weight"])

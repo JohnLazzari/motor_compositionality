@@ -1,2 +1,2 @@
-model_name=rnn256_softplus
-experiment=train_rnn256_softplus
+model_name=rnn256_softplus_sd1e-3_ma1e-2
+experiment=compute_interpolated_fps_halfcircleclk_halfcirclecclk_movement_proprioception
