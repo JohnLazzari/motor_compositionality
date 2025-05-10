@@ -34,6 +34,7 @@ from losses import l1_dist
 import scipy
 from mRNNTorch.analysis import flow_field
 import matplotlib.patches as mpatches
+import matplotlib as mpl
 from exp_utils import _test, env_dict
 
 
@@ -180,16 +181,17 @@ def plot_task_feedback(model_name):
 
     for env in env_dict:
 
-        trial_data = _test(model_path, model_file, options, env=env_dict[env])
-    
+        trial_data = _test(model_path, model_file, options, env_dict[env])
+
         for i, inp in enumerate(trial_data["obs"]):
 
-            fig, ax = plt.subplots(7, 1)
+            fig, ax = plt.subplots(9, 1,
+                                    gridspec_kw={'height_ratios': [1, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 1, 1]})
             fig.set_size_inches(3, 6)
             plt.rc('font', size=6)
 
-            ax[0].imshow(inp[:, :10].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
-            # Remove top and right only (common for minimalist style)
+            cax = ax[0].imshow(inp[:, :10].T, cmap="Reds", aspect="auto")
+            fig.colorbar(cax, ax=ax[0])
             ax[0].spines['top'].set_visible(False)
             ax[0].spines['right'].set_visible(False)
             ax[0].spines['bottom'].set_visible(False)
@@ -210,34 +212,52 @@ def plot_task_feedback(model_name):
             ax[2].set_xticks([])
             ax[2].set_title("Go Cue")
 
-            ax[3].imshow(inp[:, 12:14].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[3].plot(inp[:, 12:13], color="blue")
             ax[3].spines['top'].set_visible(False)
             ax[3].spines['right'].set_visible(False)
             ax[3].spines['bottom'].set_visible(False)
             ax[3].set_xticks([])
-            ax[3].set_title("Target Position")
+            ax[3].set_title("Target X Position")
 
-            ax[4].imshow(inp[:, 14:16].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[4].plot(inp[:, 13:14], color="blue")
             ax[4].spines['top'].set_visible(False)
             ax[4].spines['right'].set_visible(False)
             ax[4].spines['bottom'].set_visible(False)
             ax[4].set_xticks([])
-            ax[4].set_title("Fingertip")
+            ax[4].set_title("Target Y Position")
 
-            ax[5].imshow(inp[:, 16:22].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[5].plot(inp[:, 14:15], color="blue")
             ax[5].spines['top'].set_visible(False)
             ax[5].spines['right'].set_visible(False)
             ax[5].spines['bottom'].set_visible(False)
             ax[5].set_xticks([])
-            ax[5].set_title("Muscle Length")
-            
-            ax[6].imshow(inp[:, 22:28].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[5].set_title("Fingertip X Position")
+
+            ax[6].plot(inp[:, 15:16], color="blue")
             ax[6].spines['top'].set_visible(False)
             ax[6].spines['right'].set_visible(False)
             ax[6].spines['bottom'].set_visible(False)
-            ax[6].set_title("Muscle Velocity")
+            ax[6].set_xticks([])
+            ax[6].set_title("Fingertip Y Position")
 
-            save_fig(os.path.join(exp_path, f"{env}_input_orientation{i}"))
+            cax = ax[7].imshow(inp[:, 16:22].T, cmap="seismic", aspect="auto")
+            fig.colorbar(cax, ax=ax[7])
+            ax[7].spines['top'].set_visible(False)
+            ax[7].spines['right'].set_visible(False)
+            ax[7].spines['bottom'].set_visible(False)
+            ax[7].set_xticks([])
+            ax[7].set_title("Muscle Length")
+            
+            cax = ax[8].imshow(inp[:, 22:28].T, cmap="seismic", aspect="auto")
+            fig.colorbar(cax, ax=ax[8])
+            ax[8].spines['top'].set_visible(False)
+            ax[8].spines['right'].set_visible(False)
+            ax[8].spines['bottom'].set_visible(False)
+            ax[8].set_title("Muscle Velocity")
+            ax[8].set_xlabel("Timesteps")
+
+            save_fig(os.path.join(exp_path, f"{env}_input_orientation{i}"), eps=True)
+    
 
 
 

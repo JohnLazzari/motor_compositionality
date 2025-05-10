@@ -139,29 +139,18 @@ class Analysis(object):
         self.hp = hp
         self.data_type = data_type
 
-    def plot_cluster_score(self, save_name):
+    def plot_cluster_score(self):
         """Plot the score by the number of clusters."""
         fig = plt.figure(figsize=(2, 2))
         ax = fig.add_axes([0.3, 0.3, 0.55, 0.55])
         ax.plot(self.n_clusters, self.scores, 'o-', ms=3)
-        ax.set_xlabel('Number of clusters', fontsize=7)
-        ax.set_ylabel('Silhouette score', fontsize=7)
-        ax.set_title('Chosen number of clusters: {:d}'.format(self.n_cluster),
-                     fontsize=7)
         ax.spines["right"].set_visible(False)
         ax.spines["top"].set_visible(False)
         ax.xaxis.set_ticks_position('bottom')
         ax.yaxis.set_ticks_position('left')
         ax.set_ylim([0, 0.32])
-        if save:
-            fig_name = 'cluster_score'
-            if save_name is None:
-                save_name = self.hp['activation']
-            fig_name = fig_name + save_name
-            plt.savefig(save_name)
-            plt.close()
 
-    def plot_variance(self, save_path):
+    def plot_variance(self):
         labels = self.labels
         ######################### Plotting Variance ###################################
         # Plot Normalized Variance
@@ -195,7 +184,6 @@ class Analysis(object):
                    rotation=0, va='center', fontsize=fs)
         plt.xticks([])
         plt.title('Units', fontsize=7, y=0.97)
-        plt.xlabel('Clusters', fontsize=7, labelpad=labelpad)
         ax.tick_params('both', length=0)
         for loc in ['bottom','top','left','right']:
             ax.spines[loc].set_visible(False)
@@ -209,7 +197,6 @@ class Analysis(object):
         elif self.normalization_method == 'none':
             clabel = 'Variance'
 
-        cb.set_label(clabel, fontsize=7, labelpad=0)
         plt.tick_params(axis='both', which='major', labelsize=7)
         
 
@@ -226,47 +213,7 @@ class Analysis(object):
             ax.set_ylim([-1, 1])
             ax.axis('off')
 
-        # Get the directory part of the save path
-        directory = os.path.dirname(save_path)
-        # Check if the directory exists, and create it if it doesn't
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        plt.savefig(save_path)
-
-    def plot_similarity_matrix(self):
-        labels = self.labels
-        ######################### Plotting Similarity Matrix ##########################
-
-        from sklearn.metrics.pairwise import cosine_similarity
-        similarity = cosine_similarity(self.h_normvar_all) # TODO: check
-        fig = plt.figure(figsize=(3.5, 3.5))
-        ax = fig.add_axes([0.25, 0.25, 0.6, 0.6])
-        im = ax.imshow(similarity, cmap='hot', interpolation='nearest', vmin=0, vmax=1)
-        ax.axis('off')
-
-        ax = fig.add_axes([0.87, 0.25, 0.03, 0.6])
-        cb = plt.colorbar(im, cax=ax, ticks=[0,1])
-        cb.outline.set_linewidth(0.5)
-        cb.set_label('Similarity', fontsize=7, labelpad=0)
-        plt.tick_params(axis='both', which='major', labelsize=7)
-
-        ax1 = fig.add_axes([0.25, 0.85, 0.6, 0.05])
-        ax2 = fig.add_axes([0.2, 0.25, 0.05, 0.6])
-        for il, l in enumerate(self.unique_labels):
-            ind_l = np.where(labels==l)[0][[0, -1]]+np.array([0,1])
-            ax1.plot(ind_l, [0,0], linewidth=2, solid_capstyle='butt',
-                    color=kelly_colors[il+1])
-            ax2.plot([0,0], len(labels)-ind_l, linewidth=2, solid_capstyle='butt',
-                    color=kelly_colors[il+1])
-        ax1.set_xlim([0, len(labels)])
-        ax2.set_ylim([0, len(labels)])
-        ax1.axis('off')
-        ax2.axis('off')
-        if save:
-            plt.savefig('figure/feature_similarity_by'+self.data_type+'.pdf', transparent=True)
-        plt.show()
-
-    def plot_2Dvisualization(self, save_path, method='tSNE'):
+    def plot_2Dvisualization(self, method='tSNE'):
         labels = self.labels
         ######################## Plotting 2-D visualization of variance map ###########
         from sklearn.manifold import TSNE, MDS, LocallyLinearEmbedding
@@ -292,16 +239,4 @@ class Analysis(object):
         for il, l in enumerate(self.unique_labels):
             ind_l = np.where(labels==l)[0]
             ax.scatter(Y[ind_l, 0], Y[ind_l, 1], color=kelly_colors[il+1], s=10)
-        ax.axis('off')
-        plt.title(method, fontsize=7)
-        # Get the directory part of the save path
-        directory = os.path.dirname(save_path)
-        # Check if the directory exists, and create it if it doesn't
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        plt.savefig(save_path)
-
-        fig = plt.figure(figsize=(3.5, 3.5))
-        ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
-        ax.scatter(Y[:,0], Y[:,1], color='black')
         ax.axis('off')

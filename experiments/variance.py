@@ -4,7 +4,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
-from utils import load_hp, interpolate_trial
+from utils import load_hp, interpolate_trial, save_fig
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -17,6 +17,9 @@ from analysis.clustering import Analysis
 import pickle
 import tqdm as tqdm
 from exp_utils import _test, env_dict
+import matplotlib.pyplot as plt
+
+plt.rcParams.update({'font.size': 18})  # Sets default font size for all text
 
 def variance_by_rule(model_name):
 
@@ -36,10 +39,11 @@ def variance_by_rule(model_name):
 
             options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "speed_cond": speed, "delay_cond": 0}
             trial_data = _test(model_path, model_file, options, env=env_dict[env])
-            delay_time = trial_data["epoch_bounds"]["delay"][0]
+            movement_start = trial_data["epoch_bounds"]["movement"][0]
+            movement_end = trial_data["epoch_bounds"]["movement"][1]
 
             # Should be of shape batch, time, neurons
-            h = trial_data["h"][:, delay_time:]
+            h = trial_data["h"][:, movement_start:movement_end]
             dir_var_list.append(h)
 
         # Get the max timesteps to interpolate
@@ -112,9 +116,12 @@ def plot_variance_by_rule(model_name):
     exp_path = f"results/{model_name}/variance"
     
     clustering = Analysis(model_path, "rule")
-    clustering.plot_variance(os.path.join(exp_path, "variance_rule.png"))
-    clustering.plot_cluster_score(os.path.join(exp_path, "cluster_score_rule.png"))
-    clustering.plot_2Dvisualization(os.path.join(exp_path, "clusters_rule.png"))
+    clustering.plot_variance()
+    save_fig(os.path.join(exp_path, "variance_rule"), eps=True)
+    clustering.plot_cluster_score()
+    save_fig(os.path.join(exp_path, "cluster_score_rule"), eps=True)
+    clustering.plot_2Dvisualization()
+    save_fig(os.path.join(exp_path, "clusters_rule"), eps=True)
 
 
 
@@ -125,9 +132,12 @@ def plot_variance_by_epoch(model_name):
     exp_path = f"results/{model_name}/variance/variance_epoch.png"
     
     clustering = Analysis(model_path, "epoch")
-    clustering.plot_variance(os.path.join(exp_path, "variance_epoch.png"))
-    clustering.plot_cluster_score(os.path.join(exp_path, "cluster_score_epoch.png"))
-    clustering.plot_2Dvisualization(os.path.join(exp_path, "clusters_epoch.png"))
+    clustering.plot_variance()
+    save_fig(os.path.join(exp_path, "variance_epoch"), eps=True)
+    clustering.plot_cluster_score()
+    save_fig(os.path.join(exp_path, "cluster_score_epoch"), eps=True)
+    clustering.plot_2Dvisualization()
+    save_fig(os.path.join(exp_path, "clusters_epoch"), eps=True)
 
 
 

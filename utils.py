@@ -31,9 +31,9 @@ def save_fig(save_path, eps=False):
     create_dir(dir)
     plt.tight_layout()
     if eps:
-        plt.savefig(save_path, format="eps")
+        plt.savefig(save_path + ".pdf", format="pdf")
     else:
-        plt.savefig(save_path)
+        plt.savefig(save_path + ".png")
     plt.close()
 
 def load_pickle(file):

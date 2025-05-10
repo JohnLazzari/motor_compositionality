@@ -52,7 +52,7 @@ env_dict = {
 
 
 
-def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, noise=False):
+def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, noise=False, noise_act=0.1, noise_inp=0.01):
     """ Function will save all relevant data from a test run of a given env
 
     Args:
@@ -78,8 +78,8 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, n
             hp["hid_size"],
             effector.n_muscles, 
             activation_name=hp["activation_name"],
-            noise_level_act=hp["noise_level_act"], 
-            noise_level_inp=hp["noise_level_inp"], 
+            noise_level_act=noise_act, 
+            noise_level_inp=noise_inp, 
             constrained=hp["constrained"], 
             dt=hp["dt"],
             t_const=hp["t_const"],
