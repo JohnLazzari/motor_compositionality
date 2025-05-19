@@ -11,12 +11,12 @@ warnings.filterwarnings("ignore")
 
 from train import train_2link
 import motornet as mn
-from model import RNNPolicy, GRUPolicy
+from model import RNNPolicy, GRUPolicy, OrthogonalNet
 import torch
 import os
 from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
-from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
+from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv, ComposableEnv
 import matplotlib.pyplot as plt
 import numpy as np
 import config
@@ -35,6 +35,7 @@ import scipy
 from mRNNTorch.analysis import flow_field
 import matplotlib.patches as mpatches
 from exp_utils import _test, env_dict
+from itertools import product
 
 plt.rcParams.update({'font.size': 18})  # Sets default font size for all text
 
@@ -92,6 +93,218 @@ def plot_task_kinematics(model_name):
             plt.gca().spines['top'].set_visible(False)
             plt.gca().spines['right'].set_visible(False)
             save_fig(os.path.join(exp_path, "ypos", f"{env}_speed{speed}_ypos"))
+
+
+
+
+
+
+def plot_task_kinematics_held_out_transfer(model_name):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
+
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/kinematics/held_out_transfer"
+
+    env_dict = {
+        "DlySinusoidInv": DlySinusoidInv, 
+        "DlyFigure8Inv": DlyFigure8Inv,
+    }
+
+    plt.rc('figure', figsize=(4, 4))
+
+    for env in env_dict:
+
+        options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": 5, "delay_cond": 1}
+
+        trial_data = _test(model_path, model_file, options, env=env_dict[env], add_new_rule_inputs=True)
+    
+        # Get kinematics and activity in a center out setting
+        # On random and delay
+        colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
+
+        for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
+            plt.plot(xy[:, 0], xy[:, 1], linewidth=4, color=colors[i], alpha=0.75)
+            plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=colors[i])
+            plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color=colors[i])
+
+        # Access current axes and hide top/right spines
+        plt.gca().spines['top'].set_visible(False)
+        plt.gca().spines['right'].set_visible(False)
+        save_fig(os.path.join(exp_path, "scatter", f"{env}_kinematics"), eps=True)
+
+        # Plot x coordinate only 
+        for i, xy in enumerate(trial_data["xy"]):
+            plt.plot(xy[:, 0], color=colors[i])
+
+        # Access current axes and hide top/right spines
+        plt.gca().spines['top'].set_visible(False)
+        plt.gca().spines['right'].set_visible(False)
+        save_fig(os.path.join(exp_path, "xpos", f"{env}_xpos"))
+
+        # Plot y coordinate only 
+        for i, xy in enumerate(trial_data["xy"]):
+            plt.plot(xy[:, 1], color=colors[i])
+
+        # Access current axes and hide top/right spines
+        plt.gca().spines['top'].set_visible(False)
+        plt.gca().spines['right'].set_visible(False)
+        save_fig(os.path.join(exp_path, "ypos", f"{env}_ypos"))
+
+
+
+
+def plot_task_kinematics_compositional_env(model_name):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
+
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/kinematics"
+
+    plt.rc('figure', figsize=(4, 4))
+
+    forward_motifs = [
+        "forward_halfreach",
+        "forward_halfcircleclk",
+        "forward_halfcirclecclk",
+        "forward_sinusoid",
+        "forward_sinusoidinv"
+    ]
+
+    backward_motifs = [
+        "backward_fullreach",
+        "backward_fullcircleclk",
+        "backward_fullcirclecclk",
+        "backward_figure8",
+        "backward_figure8inv"
+    ]
+
+    combination_idx = list(product(forward_motifs, backward_motifs))
+    combination_idx.remove(("forward_halfreach", "backward_fullreach"))
+    combination_idx.remove(("forward_halfcircleclk", "backward_fullcircleclk"))
+    combination_idx.remove(("forward_halfcirclecclk", "backward_fullcirclecclk"))
+    combination_idx.remove(("forward_sinusoid", "backward_figure8"))
+    combination_idx.remove(("forward_sinusoidinv", "backward_figure8inv"))
+
+    for combination in combination_idx:
+        for speed in range(10):
+
+            options = {
+                "batch_size": 8, 
+                "reach_conds": torch.arange(0, 32, 4), 
+                "speed_cond": 5, 
+                "forward_key": combination[0], 
+                "backward_key": combination[1], 
+            }
+
+            trial_data = _test(model_path, model_file, options, env=ComposableEnv, add_new_rule_inputs=True)
+        
+            # Get kinematics and activity in a center out setting
+            # On random and delay
+            colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
+
+            for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
+                plt.plot(xy[:, 0], xy[:, 1], linewidth=4, color=colors[i], alpha=0.75)
+                plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=colors[i])
+                plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color=colors[i])
+
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "scatter", f"{combination}_speed{speed}_kinematics"), eps=True)
+
+            # Plot x coordinate only 
+            for i, xy in enumerate(trial_data["xy"]):
+                plt.plot(xy[:, 0], color=colors[i])
+
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "xpos", f"{combination}_speed{speed}_xpos"))
+
+            # Plot y coordinate only 
+            for i, xy in enumerate(trial_data["xy"]):
+                plt.plot(xy[:, 1], color=colors[i])
+
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "ypos", f"{combination}_speed{speed}_ypos"))
+
+
+
+
+
+
+def plot_speed_kinematics(model_name):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
+
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/kinematics"
+
+    plt.rc('figure', figsize=(8, 4))
+
+    colors = plt.cm.Reds(np.linspace(0, 1, 10)) 
+
+    for e, env in enumerate(env_dict):
+
+        for speed in range(10):
+
+            options = {"batch_size": 16, "reach_conds": torch.arange(0, 32, 2), "speed_cond": speed, "delay_cond": 1}
+            trial_data = _test(model_path, model_file, options, env=env_dict[env], noise=True)
+
+            start = trial_data["epoch_bounds"]["movement"][0]
+            end = trial_data["epoch_bounds"]["movement"][1]
+
+            x_pos = trial_data["xy"][0, start:end, 0]
+            y_pos = trial_data["xy"][0, start:end, 1]
+    
+            # x pos
+            plt.plot(x_pos, linewidth=4, color=colors[speed])
+            if e < 5:
+                plt.xlim([0, 150])
+            else:
+                plt.xlim([0, 300])
+            ax = plt.gca()
+            lines = ax.get_lines()
+            # Remove everything
+            ax.axis('off')
+            save_fig(os.path.join(exp_path, "speeds", "speed_kinematics", f"{env}_x_kinematics_speed_{speed}"), eps=True)
+
+            # y pos
+            plt.plot(y_pos, linewidth=4, color=colors[speed])
+            if e < 5:
+                plt.xlim([0, 150])
+            else:
+                plt.xlim([0, 300])
+            ax = plt.gca()
+            lines = ax.get_lines()
+            # Remove everything
+            ax.axis('off')
+            save_fig(os.path.join(exp_path, "speeds", "speed_kinematics", f"{env}_y_kinematics_speed_{speed}"), eps=True)
+
 
 
 
@@ -202,6 +415,12 @@ if __name__ == "__main__":
     
     if args.experiment == "plot_task_kinematics":
         plot_task_kinematics(args.model_name) 
+    elif args.experiment == "plot_speed_kinematics":
+        plot_speed_kinematics(args.model_name) 
+    elif args.experiment == "plot_task_kinematics_compositional_env":
+        plot_task_kinematics_compositional_env(args.model_name) 
+    elif args.experiment == "plot_task_kinematics_held_out_transfer":
+        plot_task_kinematics_held_out_transfer(args.model_name) 
     elif args.experiment == "plot_speed_modulation":
         plot_speed_modulation(args.model_name) 
     else:

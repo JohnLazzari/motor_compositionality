@@ -26,7 +26,8 @@ warnings.filterwarnings("ignore")
 
 
 
-def principal_angles(combinations, combination_labels, mode):
+def principal_angles(combinations, combination_labels, mode, num_comps=None, control=True):
+
     """
         Perform manifold analysis (principle angles and VAF)
 
@@ -34,22 +35,24 @@ def principal_angles(combinations, combination_labels, mode):
             system: "neural" or "muscle"
             epoch: "delay" or "movement"
     """
+
     angles_dict = {}
     control_list = []
 
     if mode == "h":
-        num_comps = 12
+        num_comps = 12 if num_comps is None else num_comps
         baseline_dim = 256
     elif mode == "muscle_acts":
-        num_comps = 3
+        num_comps = 3 if num_comps is None else num_comps
         baseline_dim = 6
 
-    # Create a random manifold as a control
-    random_matrices = np.random.randn(5000, baseline_dim, num_comps)
-    random_bases = np.empty(shape=(5000, num_comps, baseline_dim))
-    for basis in range(5000):
-        q, _ = np.linalg.qr(random_matrices[basis])
-        random_bases[basis] = q.T
+    if control == True:
+        # Create a random manifold as a control
+        random_matrices = np.random.randn(5000, baseline_dim, num_comps)
+        random_bases = np.empty(shape=(5000, num_comps, baseline_dim))
+        for basis in range(5000):
+            q, _ = np.linalg.qr(random_matrices[basis])
+            random_bases[basis] = q.T
 
     for i, combination in enumerate(combinations):
         
@@ -73,21 +76,26 @@ def principal_angles(combinations, combination_labels, mode):
         angles = np.degrees(np.arccos(s))
         angles_dict[combination_labels[i]] = angles
 
-    # Get principle angles control
-    for i in range(5000):
-        rand1 = np.random.randint(2, 5000-1)
-        rand2 = np.random.randint(0, rand1-1)
-        inner_prod_mat = random_bases[rand1] @ random_bases[rand2].T # Should be m x m
-        U, s, Vh = np.linalg.svd(inner_prod_mat)
-        angles = np.degrees(np.arccos(s))
-        control_list.append(angles)
-    control_array = np.stack(control_list, axis=0)
+    if control == True:
+        # Get principle angles control
+        for i in range(5000):
+            rand1 = np.random.randint(2, 5000-1)
+            rand2 = np.random.randint(0, rand1-1)
+            inner_prod_mat = random_bases[rand1] @ random_bases[rand2].T # Should be m x m
+            U, s, Vh = np.linalg.svd(inner_prod_mat)
+            angles = np.degrees(np.arccos(s))
+            control_list.append(angles)
+        control_array = np.stack(control_list, axis=0)
 
-    return angles_dict, control_array
+        return angles_dict, control_array
+    
+    else:
+
+        return angles_dict
 
 
 
-def vaf_ratio(combinations, mode):
+def vaf_ratio(combinations, mode, num_comps=None, control=True):
 
     # Only use two muscle PCs for this task, but use three for the one above
 
@@ -95,20 +103,21 @@ def vaf_ratio(combinations, mode):
     vaf_ratio_list_control = []
 
     if mode == "h":
-        num_comps = 12
+        num_comps = 12 if num_comps is None else num_comps
         baseline_dim = 256
         percentile = 90
     elif mode == "muscle_acts":
-        num_comps = 2
+        num_comps = 2 if num_comps is None else num_comps
         baseline_dim = 6
         percentile = 90
 
-    # Create a random manifold as a control
-    random_matrices = np.random.randn(5000, baseline_dim, num_comps)
-    random_bases = np.empty(shape=(5000, num_comps, baseline_dim))
-    for basis in range(5000):
-        q, _ = np.linalg.qr(random_matrices[basis])
-        random_bases[basis] = q.T
+    if control == True:
+        # Create a random manifold as a control
+        random_matrices = np.random.randn(5000, baseline_dim, num_comps)
+        random_bases = np.empty(shape=(5000, num_comps, baseline_dim))
+        for basis in range(5000):
+            q, _ = np.linalg.qr(random_matrices[basis])
+            random_bases[basis] = q.T
 
     for combination in combinations:
         
@@ -150,14 +159,18 @@ def vaf_ratio(combinations, mode):
         ratio_task2 = across_task_vaf_task2 / within_task_vaf_task2
         vaf_ratio_list.append(ratio_task2)
 
-        # ------------------------------------ CONTROL ACROSS TASK VAFs
+        if control == True:
+            # ------------------------------------ CONTROL ACROSS TASK VAFs
 
-        # Get random VAFs
-        across_task_vaf = (random_bases @ task1_data.T).var(axis=2).sum(axis=1) / task1_data.var(axis=0).sum()
-        vaf_ratio_list_control.append(np.percentile(across_task_vaf, percentile) / within_task_vaf_task1)
+            # Get random VAFs
+            across_task_vaf = (random_bases @ task1_data.T).var(axis=2).sum(axis=1) / task1_data.var(axis=0).sum()
+            vaf_ratio_list_control.append(np.percentile(across_task_vaf, percentile) / within_task_vaf_task1)
 
-        # Get random VAFs
-        across_task_vaf = (random_bases @ task2_data.T).var(axis=2).sum(axis=1) / task2_data.var(axis=0).sum()
-        vaf_ratio_list_control.append(np.percentile(across_task_vaf, percentile) / within_task_vaf_task2)
-
-    return vaf_ratio_list, vaf_ratio_list_control
+            # Get random VAFs
+            across_task_vaf = (random_bases @ task2_data.T).var(axis=2).sum(axis=1) / task2_data.var(axis=0).sum()
+            vaf_ratio_list_control.append(np.percentile(across_task_vaf, percentile) / within_task_vaf_task2)
+    
+    if control == True:
+        return vaf_ratio_list, vaf_ratio_list_control
+    else:
+        return vaf_ratio_list

@@ -9,6 +9,7 @@ from utils import load_hp, interpolate_trial
 import warnings
 warnings.filterwarnings("ignore")
 
+import math
 import motornet as mn
 from model import RNNPolicy, GRUPolicy
 import torch
@@ -20,6 +21,7 @@ import config
 import pickle
 from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
 import analysis.plot_utils as plot_utils
+from analysis.manifold import principal_angles, vaf_ratio
 import tqdm as tqdm
 from sklearn.decomposition import PCA
 import matplotlib.patches as mpatches
@@ -29,8 +31,51 @@ import itertools
 import seaborn as sns
 import scipy
 from utils import interpolate_trial
+import pandas as pd
 
 plt.rcParams.update({'font.size': 18})  # Sets default font size for all text
+
+extension_movements_half = [
+    "DlyHalfReach",
+    "DlyHalfCircleClk",
+    "DlyHalfCircleCClk",
+    "DlySinusoid",
+    "DlySinusoidInv"
+]
+
+extension_movements_full = [
+    "DlyFullReach1",
+    "DlyFullCircleClk1",
+    "DlyFullCircleCClk1",
+    "DlyFigure81",
+    "DlyFigure8Inv1"
+]
+
+retraction_movements_full = [
+    "DlyFullReach2",
+    "DlyFullCircleClk2",
+    "DlyFullCircleCClk2",
+    "DlyFigure82",
+    "DlyFigure8Inv2"
+]
+
+extension_half_combinations = list(itertools.combinations(extension_movements_half, 2))
+extension_full_combinations = list(itertools.combinations(extension_movements_full, 2))
+extension_tasks = [*extension_half_combinations, *extension_full_combinations]
+
+
+retraction_full_combinations = list(itertools.combinations(retraction_movements_full, 2))
+retraction_tasks = retraction_full_combinations
+
+subset_tasks = [
+    ("DlyHalfCircleClk", "DlyFullCircleClk1"),
+    ("DlySinusoid", "DlyFigure81"),
+    ("DlyHalfReach", "DlyFullReach1"),
+    ("DlyHalfCircleCClk", "DlyFullCircleCClk1"),
+    ("DlySinusoidInv", "DlyFigure8Inv1"),
+]
+
+extension_retraction_tasks = list(itertools.product(extension_movements_half, retraction_movements_full))
 
 
 def _get_pcs(model_name, batch_size=8, epoch=None, speed_cond=5, delay_cond=1, noise=False, system="neural"):
@@ -184,7 +229,10 @@ def neural_epoch_pcs_halfreach_fullreach(model_name):
 
 
 
-def _interpolated_fps(model_name, task1, task2, epoch, input_component=None):
+def _interpolated_fps(model_name, task1, task2,  epoch, task1_period="all", task2_period="all", input_component=None):
+
+    # Task 1 and task 2 period represent either collecting only half of the movement, or all, in specific periods
+    # These values can be first, second, or all
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -232,11 +280,28 @@ def _interpolated_fps(model_name, task1, task2, epoch, input_component=None):
         inp2 = trial_data2["obs"][:, trial_data2["epoch_bounds"]["delay"][1]-1]
 
     elif epoch == "movement":
+
         middle_movement1 = int((trial_data1["epoch_bounds"]["movement"][1] + trial_data1["epoch_bounds"]["movement"][0]) / 2)
         middle_movement2 = int((trial_data2["epoch_bounds"]["movement"][1] + trial_data2["epoch_bounds"]["movement"][0]) / 2)
-        inp1 = trial_data1["obs"][:, middle_movement1]
-        inp2 = trial_data2["obs"][:, middle_movement2]
 
+        if task1_period == "first":
+            interpolation_point = int((middle_movement1 + trial_data1["epoch_bounds"]["movement"][0]) / 2)
+            inp1 = trial_data1["obs"][:, interpolation_point]
+        elif task1_period == "second":
+            interpolation_point = int((middle_movement1 + trial_data1["epoch_bounds"]["movement"][1]) / 2)
+            inp1 = trial_data1["obs"][:, interpolation_point]
+        elif task1_period == "all":
+            # This option only makes sense if using a half task
+            inp1 = trial_data1["obs"][:, middle_movement1]
+
+        if task2_period == "first":
+            interpolation_point = int((middle_movement2 + trial_data2["epoch_bounds"]["movement"][0]) / 2)
+            inp2 = trial_data2["obs"][:, interpolation_point]
+        elif task2_period == "second":
+            interpolation_point = int((middle_movement2 + trial_data2["epoch_bounds"]["movement"][1]) / 2)
+            inp2 = trial_data2["obs"][:, interpolation_point]
+        elif task2_period == "all":
+            inp2 = trial_data2["obs"][:, middle_movement2]
 
     '''Fixed point finder hyperparameters. See FixedPointFinder.py for detailed
     descriptions of available hyperparameters.'''
@@ -320,7 +385,7 @@ def _interpolated_fps(model_name, task1, task2, epoch, input_component=None):
         cond_fps_list.append(fps_list)
 
     # Save all information of fps across tasks to pickle file
-    save_name = f'interpolated_fps_{task1}_{task2}_{epoch}_{input_component}'
+    save_name = f'interpolated_fps_{task1}_{task2}_{epoch}_{task1_period}_{task2_period}_{input_component}'
     fname = os.path.join(model_path, save_name + '.pkl')
     print('interpolated fps saved at {:s}'.format(fname))
     with open(fname, 'wb') as f:
@@ -330,54 +395,53 @@ def _interpolated_fps(model_name, task1, task2, epoch, input_component=None):
 
 
 
-# Similar tasks
+#---------------------------------------------------------------- Subset Pair
 
 # Delay period with different input interpolations
-def compute_interpolated_fps_halfreach_fullreach_delay(model_name):
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay")
 def compute_interpolated_fps_halfreach_fullreach_delay_rule(model_name):
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", "rule")
-def compute_interpolated_fps_halfreach_fullreach_delay_proprioception(model_name):
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", "proprioception")
-
+    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", input_component="rule")
 # Movement period with different input interpolations
-def compute_interpolated_fps_halfreach_fullreach_movement(model_name):
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement")
 def compute_interpolated_fps_halfreach_fullreach_movement_rule(model_name):
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", "rule")
-def compute_interpolated_fps_halfreach_fullreach_movement_proprioception(model_name):
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", "proprioception")
+    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", task1_period="all", task2_period="first", input_component="rule")
 
-# Dissimilar tasks
+#---------------------------------------------------------------- Extension Pair
 
 # Delay period with different input interpolations
-def compute_interpolated_fps_halfcircleclk_figure8inv_delay(model_name):
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay")
-def compute_interpolated_fps_halfcircleclk_figure8inv_delay_rule(model_name):
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "rule")
-def compute_interpolated_fps_halfcircleclk_figure8inv_delay_proprioception(model_name):
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "proprioception")
-
+def compute_interpolated_fps_halfcircleclk_sinusoidinv_delay_rule(model_name):
+    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlySinusoidInv", "delay", input_component="rule")
 # Movement period with different input interpolations
-def compute_interpolated_fps_halfcircleclk_figure8inv_movement(model_name):
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement")
-def compute_interpolated_fps_halfcircleclk_figure8inv_movement_rule(model_name):
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "rule")
-def compute_interpolated_fps_halfcircleclk_figure8inv_movement_proprioception(model_name):
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "proprioception")
+def compute_interpolated_fps_halfcircleclk_sinusoidinv_movement_rule(model_name):
+    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlySinusoidInv", "movement", task1_period="all", task2_period="all", input_component="rule")
 
+#---------------------------------------------------------------- Retraction Pair
+
+# Delay period with different input interpolations
+def compute_interpolated_fps_fullcircleclk_figure8_delay_rule(model_name):
+    _interpolated_fps(model_name, "DlyFullCircleClk", "DlyFigure8", "delay", input_component="rule")
+# Movement period with different input interpolations
+def compute_interpolated_fps_fullcircleclk_figure8_movement_rule(model_name):
+    _interpolated_fps(model_name, "DlyFullCircleClk", "DlyFigure8", "movement", task1_period="second", task2_period="second", input_component="rule")
+
+#---------------------------------------------------------------- Extension-Retraction Pair
+
+# Delay period with different input interpolations
+def compute_interpolated_fps_sinusoid_fullreach_delay_rule(model_name):
+    _interpolated_fps(model_name, "DlySinusoid", "DlyFullReach", "delay", input_component="rule")
+# Movement period with different input interpolations
+def compute_interpolated_fps_sinusoid_fullreach_movement_rule(model_name):
+    _interpolated_fps(model_name, "DlySinusoid", "DlyFullReach", "movement", task1_period="all", task2_period="second", input_component="rule")
 
 
 
 def run_all_compute_interpolated_fps(model_name):
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", "rule")
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", "proprioception")
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", "rule")
-    _interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", "proprioception")
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "rule")
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "proprioception")
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "rule")
-    _interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "proprioception")
+    compute_interpolated_fps_halfreach_fullreach_delay_rule(model_name)
+    compute_interpolated_fps_halfreach_fullreach_movement_rule(model_name)
+    compute_interpolated_fps_halfcircleclk_sinusoidinv_delay_rule(model_name)
+    compute_interpolated_fps_halfcircleclk_sinusoidinv_movement_rule(model_name)
+    compute_interpolated_fps_fullcircleclk_figure8_delay_rule(model_name)
+    compute_interpolated_fps_fullcircleclk_figure8_movement_rule(model_name)
+    compute_interpolated_fps_sinusoid_fullreach_delay_rule(model_name)
+    compute_interpolated_fps_sinusoid_fullreach_movement_rule(model_name)
 
 
 
@@ -595,11 +659,11 @@ def plot_input_switching(model_name):
 
 
 
-def _plot_interpolated_fps(model_name, task1, task2, epoch, input_component=None):
+def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", task2_period="all", input_component=None):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
-    load_name = os.path.join(model_path, f"interpolated_fps_{task1}_{task2}_{epoch}_{input_component}.pkl")
+    load_name = os.path.join(model_path, f"interpolated_fps_{task1}_{task2}_{epoch}_{task1_period}_{task2_period}_{input_component}.pkl")
     exp_path = f"results/{model_name}/compositionality/interpolated_fps"
 
     fps = load_pickle(load_name)
@@ -609,23 +673,15 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, input_component=None
     options = {"batch_size": 16, "reach_conds": torch.arange(0, 32, 2), "delay_cond": 1, "speed_cond": 5}
 
     colors_alpha = plt.cm.magma(np.linspace(0, 1, 20)) 
-    colors_conditions = plt.cm.inferno(np.linspace(0, 1, 20)) 
 
     trial_data1 = _test(model_path, model_file, options, env=env_dict[task1])
     trial_data2 = _test(model_path, model_file, options, env=env_dict[task2])
 
     trial_data1_h_epoch = trial_data1["h"][:, trial_data1["epoch_bounds"][epoch][0]:trial_data1["epoch_bounds"][epoch][1]] 
     trial_data2_h_epoch = trial_data2["h"][:, trial_data2["epoch_bounds"][epoch][0]:trial_data2["epoch_bounds"][epoch][1]] 
-    combined_tasks = torch.cat([trial_data1_h_epoch, trial_data2_h_epoch], dim=1)
-
-    task_hs = []
-    for env in env_dict:
-        trial_data = _test(model_path, model_file, options, env=env_dict[env])
-        task_hs.append(trial_data["h"][:, trial_data["epoch_bounds"][epoch][0]:trial_data["epoch_bounds"][epoch][1]])
-    all_task_hs = torch.cat(task_hs, dim=1)
 
     two_task_pca = PCA(n_components=2)
-    two_task_pca.fit(combined_tasks.reshape((-1, combined_tasks.shape[-1])))
+    two_task_pca.fit(trial_data1_h_epoch.reshape((-1, trial_data1_h_epoch.shape[-1])))
 
     # Create figure and 3D axes
     fig = plt.figure(figsize=(4, 4))
@@ -644,14 +700,36 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, input_component=None
                             two_task_pca,
                             make_plot=False
                         )
-                ax.scatter(i/20, zstar[:, 0], zstar[:, 1], marker='.', alpha=0.75, color=colors_alpha[i], s=200)
+                ax.scatter(i/20, zstar[:, 0], zstar[:, 1], marker='.', alpha=0.75, color=colors_alpha[i], s=250)
 
     ax.grid(False)
-    save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", f"{task1}_{task2}_{epoch}_{input_component}"), eps=True)
+    save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", f"{task1}_{task2}_{epoch}_{task1_period}_{task2_period}_{input_component}"), eps=True)
 
     # Create figure and 3D axes
     fig = plt.figure(figsize=(4, 4))
     ax = fig.add_subplot(111, projection='3d')  # or projection='3d'
+
+    colors_traj = plt.cm.inferno(np.linspace(0, 1, 10)) 
+
+    middle_movement1 = int((trial_data1["epoch_bounds"]["movement"][1] + trial_data1["epoch_bounds"]["movement"][0]) / 2)
+    middle_movement2 = int((trial_data2["epoch_bounds"]["movement"][1] + trial_data2["epoch_bounds"]["movement"][0]) / 2)
+
+    if task1_period == "first":
+        trial_data1_h_epoch = trial_data1["h"][:, trial_data1["epoch_bounds"]["movement"][0]:middle_movement1]
+    elif task1_period == "second":
+        trial_data1_h_epoch = trial_data1["h"][:, middle_movement1:trial_data1["epoch_bounds"]["movement"][1]]
+    elif task1_period == "all":
+        trial_data1_h_epoch = trial_data1["h"][:, trial_data1["epoch_bounds"]["movement"][0]:trial_data1["epoch_bounds"]["movement"][1]]
+
+    if task2_period == "first":
+        trial_data2_h_epoch = trial_data2["h"][:, trial_data2["epoch_bounds"]["movement"][0]:middle_movement2]
+    elif task2_period == "second":
+        trial_data2_h_epoch = trial_data2["h"][:, middle_movement2:trial_data2["epoch_bounds"]["movement"][1]]
+    elif task2_period == "all":
+        trial_data2_h_epoch = trial_data2["h"][:, trial_data2["epoch_bounds"]["movement"][0]:trial_data2["epoch_bounds"]["movement"][1]]
+
+    # Get trajectories during task period
+    combined_tasks = torch.cat([trial_data1_h_epoch, trial_data2_h_epoch], dim=1)
 
     two_task_pca_3d = PCA(n_components=3)
     two_task_pca_3d.fit(combined_tasks.reshape((-1, combined_tasks.shape[-1])))
@@ -671,213 +749,80 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, input_component=None
         3
     ))
 
-    for c, condition in enumerate(trial_data_1_projected):
-        ax.plot(condition[:, 0], condition[:, 1], condition[:, 2], linewidth=4, color=colors_conditions[c], alpha=0.75)
-        ax.scatter(condition[0, 0], condition[0, 1], condition[0, 2], s=150, marker="^", color=colors_conditions[c])
-        ax.scatter(condition[-1, 0], condition[-1, 1], condition[-1, 2], s=150, marker="X", color=colors_conditions[c])
-    for c, condition in enumerate(trial_data_2_projected):
-        ax.plot(condition[:, 0], condition[:, 1], condition[:, 2], linewidth=4, color=colors_conditions[c], alpha=0.25)
-        ax.scatter(condition[0, 0], condition[0, 1], condition[0, 2], s=150, marker="^", color=colors_conditions[c])
-        ax.scatter(condition[-1, 0], condition[-1, 1], condition[-1, 2], s=150, marker="X", color=colors_conditions[c])
+    min_value = torch.min(combined_tasks)
 
-    ax.grid(False)
+    for c, condition in enumerate(trial_data_1_projected):
+        ax.plot(condition[:, 0], condition[:, 1], condition[:, 2], linewidth=4, color=colors_traj[7], alpha=0.75, zorder=10)
+        ax.scatter(condition[0, 0], condition[0, 1], condition[0, 2], s=150, marker="^", color=colors_traj[7])
+        ax.scatter(condition[-1, 0], condition[-1, 1], condition[-1, 2], s=150, marker="X", color=colors_traj[7])
+    for c, condition in enumerate(trial_data_2_projected):
+        ax.plot(condition[:, 0], condition[:, 1], condition[:, 2], linewidth=4, color="black", alpha=0.75, zorder=10)
+        ax.scatter(condition[0, 0], condition[0, 1], condition[0, 2], s=150, marker="^", color="black", zorder=20)
+        ax.scatter(condition[-1, 0], condition[-1, 1], condition[-1, 2], s=150, marker="X", color="black", zorder=20)
+
+    # Remove everything but the plot line
+    ax.set_axis_off()  # hides axes, ticks, labels, etc.
     save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", f"{task1}_{task2}_{epoch}_{input_component}_pca"), eps=True)
     
 
 
 
-# Similar Tasks
-def plot_interpolated_fps_halfreach_fullreach_delay(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay")
+
+#---------------------------------------------------------------- Subset Pair
+
+# Delay period with different input interpolations
 def plot_interpolated_fps_halfreach_fullreach_delay_rule(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", "rule")
-def plot_interpolated_fps_halfreach_fullreach_delay_proprioception(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", "proprioception")
-
-def plot_interpolated_fps_halfreach_fullreach_movement(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement")
+    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", input_component="rule")
+# Movement period with different input interpolations
 def plot_interpolated_fps_halfreach_fullreach_movement_rule(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", "rule")
-def plot_interpolated_fps_halfreach_fullreach_movement_proprioception(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", "proprioception")
+    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", task1_period="all", task2_period="first", input_component="rule")
 
-# Dissimilar Tasks
-def plot_interpolated_fps_halfcircleclk_figure8inv_delay(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay")
-def plot_interpolated_fps_halfcircleclk_figure8inv_delay_rule(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "rule")
-def plot_interpolated_fps_halfcircleclk_figure8inv_delay_proprioception(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "proprioception")
+#---------------------------------------------------------------- Extension Pair
 
-def plot_interpolated_fps_halfcircleclk_figure8inv_movement(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement")
-def plot_interpolated_fps_halfcircleclk_figure8inv_movement_rule(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "rule")
-def plot_interpolated_fps_halfcircleclk_figure8inv_movement_proprioception(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "proprioception")
+# Delay period with different input interpolations
+def plot_interpolated_fps_halfcircleclk_sinusoidinv_delay_rule(model_name):
+    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlySinusoidInv", "delay", input_component="rule")
+# Movement period with different input interpolations
+def plot_interpolated_fps_halfcircleclk_sinusoidinv_movement_rule(model_name):
+    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlySinusoidInv", "movement", task1_period="all", task2_period="all", input_component="rule")
 
+#---------------------------------------------------------------- Retraction Pair
+
+# Delay period with different input interpolations
+def plot_interpolated_fps_fullcircleclk_figure8_delay_rule(model_name):
+    _plot_interpolated_fps(model_name, "DlyFullCircleClk", "DlyFigure8", "delay", input_component="rule")
+# Movement period with different input interpolations
+def plot_interpolated_fps_fullcircleclk_figure8_movement_rule(model_name):
+    _plot_interpolated_fps(model_name, "DlyFullCircleClk", "DlyFigure8", "movement", task1_period="second", task2_period="second", input_component="rule")
+
+#---------------------------------------------------------------- Extension-Retraction Pair
+
+# Delay period with different input interpolations
+def plot_interpolated_fps_sinusoid_fullreach_delay_rule(model_name):
+    _plot_interpolated_fps(model_name, "DlySinusoid", "DlyFullReach", "delay", input_component="rule")
+# Movement period with different input interpolations
+def plot_interpolated_fps_sinusoid_fullreach_movement_rule(model_name):
+    _plot_interpolated_fps(model_name, "DlySinusoid", "DlyFullReach", "movement", task1_period="all", task2_period="second", input_component="rule")
 
 
 
 def run_all_plot_interpolated_fps(model_name):
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", "rule")
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "delay", "proprioception")
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", "rule")
-    _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", "proprioception")
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "rule")
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "proprioception")
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "rule")
-    _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "proprioception")
-
-
-
-def _manifold_traversal(model_name, task1, task2, epoch, system, input_component=None):
-
-    model_path = f"checkpoints/{model_name}"
-    model_file = f"{model_name}.pth"
-    load_name = os.path.join(model_path, f"interpolated_fps_{task1}_{task2}_{epoch}_{input_component}.pkl")
-    exp_path = f"results/{model_name}/compositionality/manifold_traversal"
-
-    fps = load_pickle(load_name)
-
-
-    # Get variance of units across tasks and save to pickle file in model directory
-    # Doing so across rules only
-    options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "delay_cond": 1, "speed_cond": 5}
-
-    trial_data1 = _test(model_path, model_file, options, env=env_dict[task1])
-    trial_data2 = _test(model_path, model_file, options, env=env_dict[task2])
-
-    # cond is a list containing the fps for each interpolated rule input for a given condition
-    condition_task_2_mags = []
-    condition_task_1_mags = []
-    for c, cond in enumerate(fps):
-        
-        if system == "neural":
-            interpolated_acts = np.concatenate([unique_fps["h_state"] for unique_fps in cond])
-        elif system == "muscle":
-            interpolated_acts = np.concatenate([unique_fps["muscle_acts"] for unique_fps in cond])
-
-        interpolated_kinematics = np.concatenate([unique_fps["fingertip"] for unique_fps in cond])
-
-
-        task2_pca = PCA()
-        task1_pca = PCA()
-        
-        if system == "neural":
-            # Currently this is specifying the epoch but I didn't do that for principal angles
-            task2_pca.fit(trial_data2["h"][c, trial_data2["epoch_bounds"][epoch][0]:trial_data2["epoch_bounds"][epoch][1]])
-            task1_pca.fit(trial_data1["h"][c, trial_data1["epoch_bounds"][epoch][0]:trial_data1["epoch_bounds"][epoch][1]])
-            n_components = 12
-        elif system == "muscle":
-            task2_pca.fit(trial_data2["muscle_acts"][c, trial_data2["epoch_bounds"][epoch][0]:trial_data2["epoch_bounds"][epoch][1]])
-            task1_pca.fit(trial_data1["muscle_acts"][c, trial_data1["epoch_bounds"][epoch][0]:trial_data1["epoch_bounds"][epoch][1]])
-            n_components = 6
-
-        interp_h1_projected = task1_pca.transform(interpolated_acts)
-        interp_h2_projected = task2_pca.transform(interpolated_acts)
-
-        # Going through each component
-        interp_h1_mags = np.abs(interp_h1_projected[:, :n_components]) - np.abs(interp_h1_projected[0, :n_components])
-        interp_h2_mags = np.abs(interp_h2_projected[:, :n_components]) - np.abs(interp_h2_projected[0, :n_components])
-
-        # Each item is [n_interpolated_points, n_components]
-        condition_task_2_mags.append(interp_h2_mags)
-        condition_task_1_mags.append(interp_h1_mags)
-    
-    # Convert to numpy array
-    condition_task_2_mags = np.stack(condition_task_2_mags)
-    condition_task_1_mags = np.stack(condition_task_1_mags)
-
-    # Take the mean and std along the batch dimension
-    mean_task_2_mags = condition_task_2_mags.mean(axis=0)
-    std_task_2_mags = condition_task_2_mags.std(axis=0)
-
-    mean_task_1_mags = condition_task_1_mags.mean(axis=0)
-    std_task_1_mags = condition_task_1_mags.std(axis=0)
-
-    cov_matrix = mean_task_1_mags.T @ mean_task_2_mags
-
-    colors = plt.cm.plasma(np.linspace(0, 1, n_components)) 
-
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 6))
-    ax = fig.add_subplot(111)  # or projection='3d'
-
-    x = np.linspace(0, 20, 20)
-
-    save_name = f"manifold_traversal.png"
-
-    if system == "neural":
-        ax.set_ylim([-4, 4])
-    elif system == "muscle":
-        ax.set_ylim([-.4, .4])
-    for comp in range(mean_task_2_mags.shape[1]):
-        ax.plot(mean_task_2_mags[:, comp], linewidth=4, alpha=0.5, marker="o", markersize=10, label=f"PC {comp+1}", color=colors[comp])
-        ax.errorbar(x, mean_task_2_mags[:, comp], yerr=std_task_2_mags[:, comp], fmt="none", capsize=5, color=colors[comp], alpha=0.25)
-    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-
-    save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", system, save_name))
-        
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    save_name = f"intertask_cov.png"
-
-    im = ax.imshow(cov_matrix, aspect="auto")
-    fig.colorbar(im, ax=ax)
-    save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", system, save_name))
+    plot_interpolated_fps_halfreach_fullreach_delay_rule(model_name)
+    plot_interpolated_fps_halfreach_fullreach_movement_rule(model_name)
+    plot_interpolated_fps_halfcircleclk_sinusoidinv_delay_rule(model_name)
+    plot_interpolated_fps_halfcircleclk_sinusoidinv_movement_rule(model_name)
+    plot_interpolated_fps_fullcircleclk_figure8_delay_rule(model_name)
+    plot_interpolated_fps_fullcircleclk_figure8_movement_rule(model_name)
+    plot_interpolated_fps_sinusoid_fullreach_delay_rule(model_name)
+    plot_interpolated_fps_sinusoid_fullreach_movement_rule(model_name)
 
 
 
 
-# ------------------------------------------- NEURAL MANIFOLD TRAVERSAL
-
-# Similar Tasks
-def neural_manifold_traversal_halfreach_fullreach_delay(model_name):
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "delay", "neural")
-def neural_manifold_traversal_halfreach_fullreach_delay_rule(model_name):
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "delay", "neural", "rule")
-def neural_manifold_traversal_halfreach_fullreach_delay_proprioception(model_name):
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "delay", "neural", "proprioception")
-
-def neural_manifold_traversal_halfreach_fullreach_movement(model_name):
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "neural", "movement")
-def neural_manifold_traversal_halfreach_fullreach_movement_rule(model_name):
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "movement", "neural", "rule")
-def neural_manifold_traversal_halfreach_fullreach_movement_proprioception(model_name):
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "movement", "neural", "proprioception")
-
-# Dissimilar Tasks
-def neural_manifold_traversal_halfcircleclk_figure8inv_delay(model_name):
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "neural", "delay")
-def neural_manifold_traversal_halfcircleclk_figure8inv_delay_rule(model_name):
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "neural", "rule")
-def neural_manifold_traversal_halfcircleclk_figure8inv_delay_proprioception(model_name):
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "neural", "proprioception")
-
-def neural_manifold_traversal_halfcircleclk_figure8inv_movement(model_name):
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "neural", "movement")
-def neural_manifold_traversal_halfcircleclk_figure8inv_movement_rule(model_name):
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "neural", "rule")
-def neural_manifold_traversal_halfcircleclk_figure8inv_movement_proprioception(model_name):
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "neural", "proprioception")
 
 
-def run_all_manifold_traversal(model_name):
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "delay", "rule")
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "delay", "proprioception")
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "movement", "rule")
-    _manifold_traversal(model_name, "DlyHalfReach", "DlyFullReach", "movement", "proprioception")
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "rule")
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "delay", "proprioception")
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "rule")
-    _manifold_traversal(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "movement", "proprioception")
-
-
-
-
-def _two_task_variance_explained(model_name, task1, task2):
+# TODO not sure if this is debugged but not using it rn
+def _two_task_variance_explained(model_name, task1, task2, task1_period, task2_period):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -888,27 +833,46 @@ def _two_task_variance_explained(model_name, task1, task2):
     trial_data_1 = _test(model_path, model_file, options, env=env_dict[task1])
     trial_data_2 = _test(model_path, model_file, options, env=env_dict[task2])
 
-    # TODO this is wrong, do it during specific epochs not just everything
-    task1_h = trial_data_1["h"].reshape((-1, trial_data_1["h"].shape[-1]))
-    task2_h = trial_data_2["h"].reshape((-1, trial_data_2["h"].shape[-1]))
+    middle_movement1 = int((trial_data1["epoch_bounds"]["movement"][1] + trial_data1["epoch_bounds"]["movement"][0]) / 2)
+    middle_movement2 = int((trial_data2["epoch_bounds"]["movement"][1] + trial_data2["epoch_bounds"]["movement"][0]) / 2)
 
-    pca_task1 = PCA()
-    pca_task1.fit(task1_h)
+    if task1_period == "first":
+        task_data_1_movement = trial_data1["h"][:, trial_data1["epoch_bounds"]["movement"][0]:middle_movement1]
+    elif task1_period == "second":
+        task_data_1_movement = trial_data1["h"][:, middle_movement1:trial_data1["epoch_bounds"]["movement"][1]]
+    elif task1_period == "all":
+        task_data_1_movement = trial_data1["h"][:, trial_data1["epoch_bounds"]["movement"][0]:trial_data1["epoch_bounds"]["movement"][1]]
 
-    variance_task_1 = []
-    for comp_idx in range(1, 50):
-        variance_explained = (pca_task1.components_[:comp_idx] @ task1_h.T.numpy()).var(axis=1).sum() / task1_h.var(axis=0).sum()
-        variance_task_1.append(variance_explained)
+    if task2_period == "first":
+        task_data_2_movement = trial_data2["h"][:, trial_data2["epoch_bounds"]["movement"][0]:middle_movement2]
+    elif task2_period == "second":
+        task_data_2_movement = trial_data2["h"][:, middle_movement2:trial_data2["epoch_bounds"]["movement"][1]]
+    elif task2_period == "all":
+        task_data_2_movement = trial_data2["h"][:, trial_data2["epoch_bounds"]["movement"][0]:trial_data2["epoch_bounds"]["movement"][1]]
 
-    variance_task_2 = []
-    for comp_idx in range(1, 50):
-        variance_explained = (pca_task1.components_[:comp_idx] @ task2_h.T.numpy()).var(axis=1).sum() / task2_h.var(axis=0).sum()
-        variance_task_2.append(variance_explained)
-        
-    plt.rc('figure', figsize=(3, 6))
-    plt.ylim([0, 1])
-    plt.plot(variance_task_1, color="black", marker="o", alpha=0.5, label=task1, markersize=15)
-    plt.plot(variance_task_2, color="purple", marker="o", alpha=0.5, label=task2, markersize=15)
+    for (task_1_condition, task_2_condition) in zip(task_data_1_movement, task_data_2_movement):
+
+        task1_h = task_1_condition
+        task2_h = task_2_condition
+
+        pca_task1 = PCA()
+        pca_task1.fit(task1_h)
+
+        variance_task_1 = []
+        for comp_idx in range(1, 50):
+            variance_explained = (pca_task1.components_[:comp_idx] @ task1_h.T.numpy()).var(axis=1).sum() / task1_h.var(axis=0).sum()
+            variance_task_1.append(variance_explained)
+
+        variance_task_2 = []
+        for comp_idx in range(1, 50):
+            variance_explained = (pca_task1.components_[:comp_idx] @ task2_h.T.numpy()).var(axis=1).sum() / task2_h.var(axis=0).sum()
+            variance_task_2.append(variance_explained)
+            
+        plt.rc('figure', figsize=(3, 6))
+        plt.ylim([0, 1])
+        plt.plot(variance_task_1, color="black", marker="o", alpha=0.5, label=task1, markersize=15)
+        plt.plot(variance_task_2, color="purple", marker="o", alpha=0.5, label=task2, markersize=15)
+
     plt.gca().spines['top'].set_visible(False)
     plt.gca().spines['right'].set_visible(False)
     save_fig(os.path.join(exp_path, f"{task1}_{task2}"), eps=True)
@@ -917,9 +881,13 @@ def _two_task_variance_explained(model_name, task1, task2):
 
 
 def ve_halfreach_fullreach(model_name):
-    _two_task_variance_explained(model_name, "DlyHalfReach", "DlyFullReach")
-def ve_halfcircleclk_figure8inv(model_name):
-    _two_task_variance_explained(model_name, "DlyHalfCircleClk", "DlyFigure8Inv")
+    _two_task_variance_explained(model_name, "DlyHalfReach", "DlyFullReach", "all", "first")
+def ve_halfcircleclk_sinusoidinv(model_name):
+    _two_task_variance_explained(model_name, "DlyHalfCircleClk", "DlySinusoidInv", "all", "all")
+def ve_fullcircleclk_figure8(model_name):
+    _two_task_variance_explained(model_name, "DlyFullCircleClk", "DlyFigure8", "second", "second")
+
+
 
 
 def _gather_distances(combinations, batch_size):
@@ -980,15 +948,15 @@ def _convert_motif_dict_to_list(target_dict, data):
             target_data.extend(data[(combination[1], combination[0])])
     return target_data
 
-def _plot_task_subsets(combinations, metric, label, color=None):
-    task_metric = _convert_motif_dict_to_list(combinations, metric)
-    task_metric_mean = sum(task_metric) / len(task_metric)
-    if color:
-        sns.kdeplot(task_metric, color=color, label=label, fill=True, zorder=10, legend=False, linewidth=2, alpha=0.25)
-        plt.axvline(task_metric_mean, color=color, zorder=20, linestyle="dashed")
-    else:
-        sns.kdeplot(task_metric, fill=True, label=label, zorder=10, legend=False, linewidth=2, alpha=0.25)
-        plt.axvline(task_metric_mean)
+def _plot_task_subsets(combinations, metric, combination_labels, combination_colors):
+
+    combination_means = []
+    combination_stds = []
+    for combination in combinations:
+        task_metric = _convert_motif_dict_to_list(combination, metric)
+        combination_means.append(sum(task_metric) / len(task_metric))
+        combination_stds.append(np.std(task_metric, ddof=1))
+    plt.bar(combination_labels, combination_means, yerr=combination_stds, capsize=10, color=combination_colors, edgecolor='black')
     
 
 def _trajectory_alignment(model_name, epoch):
@@ -1053,59 +1021,46 @@ def _trajectory_alignment(model_name, epoch):
     shapes_h = _gather_shapes(combinations_h, options["batch_size"])
     shapes_muscle = _gather_shapes(combinations_muscle, options["batch_size"])
 
-    # Gather task subsets
-    inverse_tasks = [
-        ("DlyHalfCircleClk", "DlyHalfCircleCClk"),
-        ("DlyHalfCircleClk", "DlyFullCircleCClk1"),
-        ("DlySinusoid", "DlySinusoidInv"),
-        ("DlySinusoid", "DlyFigure8Inv1"),
-        ("DlyFullCircleClk1", "DlyFullCircleCClk1"),
-        ("DlyFullCircleClk2", "DlyFullCircleCClk2"),
-        ("DlyFigure81", "DlyFigure8Inv1"),
-        ("DlyFigure82", "DlyFigure8Inv2")
+    all_subsets = [
+        extension_tasks, 
+        retraction_tasks,
+        subset_tasks,
+        extension_retraction_tasks,
+        combination_labels
     ]
 
-    subset_forward_tasks = [
-        ("DlyHalfCircleClk", "DlyFullCircleClk1"),
-        ("DlySinusoid", "DlyFigure81"),
-        ("DlyHalfReach", "DlyFullReach1"),
-        ("DlyHalfCircleCClk", "DlyFullCircleCClk1"),
-        ("DlySinusoidInv", "DlyFigure8Inv1"),
+    all_subset_labels = [
+        "extension_tasks",
+        "retraction_tasks",
+        "subset_tasks",
+        "extension_retraction_tasks",
+        "all_tasks"
     ]
 
-    subset_backward_tasks = [
-        ("DlyHalfCircleClk", "DlyFullCircleClk2"),
-        ("DlySinusoid", "DlyFigure82"),
-        ("DlyHalfReach", "DlyFullReach2"),
-        ("DlyHalfCircleCClk", "DlyFullCircleCClk2"),
-        ("DlySinusoidInv", "DlyFigure8Inv2"),
+    all_subset_colors = [
+        "blue",
+        "pink",
+        "purple",
+        "orange",
+        "grey"
     ]
 
-    """
-    large_h_dists = []
-    for dist_combination in distances_h:
-        mean_conds = sum(distances_h[dist_combination]) / len(distances_h[dist_combination])
-        if mean_conds > 75:
-            large_h_dists.append(dist_combination)
+    # ------------------------------------------------------------- ANGLE DISTS
 
-    close_subsets = []
-    for dist_combination in distances_muscle:
-        mean_conds = sum(distances_muscle[dist_combination]) / len(distances_muscle[dist_combination])
-        if dist_combination in large_h_dists and mean_conds < 3:
-            close_subsets.append(dist_combination)
-    """
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111)  # or projection='3d'
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
-    all_subsets = {
-        "inverse_tasks": inverse_tasks, 
-        "subset_forward_tasks": subset_forward_tasks, 
-        "subset_backward_tasks": subset_backward_tasks, 
-    }
-
-    all_subsets_colors = {
-        "inverse_tasks": "blue",
-        "subset_forward_tasks": "purple",
-        "subset_backward_tasks": "orange",
-    }
+    angle_h_dist = _convert_motif_dict_to_list(combination_labels, angles_h)
+    angle_muscle_dist = _convert_motif_dict_to_list(combination_labels, angles_muscle)
+    sns.kdeplot(angle_h_dist, color="blue", fill=True, zorder=10, legend=False, linewidth=2, alpha=0.25)
+    sns.kdeplot(angle_muscle_dist, color="purple", fill=True, zorder=10, legend=False, linewidth=2, alpha=0.25)
+    plt.axvline(sum(angle_h_dist)/len(angle_h_dist), color="blue", linestyle="dashed", linewidth=2)
+    plt.axvline(sum(angle_muscle_dist)/len(angle_muscle_dist), color="purple", linestyle="dashed", linewidth=2)
+    plt.xlim([0, 1.5])
+    save_fig(os.path.join(exp_path, epoch, "neural_muscle_angle_dists"), eps=True)
 
     # ------------------------------------------------------------- NEURAL DISTANCES
 
@@ -1115,9 +1070,8 @@ def _trajectory_alignment(model_name, epoch):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    for subset in all_subsets:
-        _plot_task_subsets(all_subsets[subset], distances_h, subset, color=all_subsets_colors[subset])
-    _plot_task_subsets(combination_labels, distances_h, "All Combinations", color="grey")
+    _plot_task_subsets(all_subsets, distances_h, all_subset_labels, all_subset_colors)
+    plt.xticks([])
     save_fig(os.path.join(exp_path, epoch, "neural_distances"), eps=True)
 
     # ------------------------------------------------------------- MUSCLE DISTANCES
@@ -1128,9 +1082,8 @@ def _trajectory_alignment(model_name, epoch):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    for subset in all_subsets:
-        _plot_task_subsets(all_subsets[subset], distances_muscle, subset, color=all_subsets_colors[subset])
-    _plot_task_subsets(combination_labels, distances_muscle, "All Combinations", color="grey")
+    _plot_task_subsets(all_subsets, distances_muscle, all_subset_labels, all_subset_colors)
+    plt.xticks([])
     save_fig(os.path.join(exp_path, epoch, "muscle_distances"), eps=True)
 
     # ------------------------------------------------------------- NEURAL ANGLES
@@ -1141,9 +1094,9 @@ def _trajectory_alignment(model_name, epoch):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    for subset in all_subsets:
-        _plot_task_subsets(all_subsets[subset], angles_h, subset, color=all_subsets_colors[subset])
-    _plot_task_subsets(combination_labels, angles_h, "All Combinations", color="grey")
+    _plot_task_subsets(all_subsets, angles_h, all_subset_labels, all_subset_colors)
+    plt.ylim([0, 1.5])
+    plt.xticks([])
     save_fig(os.path.join(exp_path, epoch, "neural_angles"), eps=True)
 
     # ------------------------------------------------------------- MUSCLE ANGLES
@@ -1154,9 +1107,9 @@ def _trajectory_alignment(model_name, epoch):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    for subset in all_subsets:
-        _plot_task_subsets(all_subsets[subset], angles_muscle, subset, color=all_subsets_colors[subset])
-    _plot_task_subsets(combination_labels, angles_muscle, "All Combinations", color="grey")
+    _plot_task_subsets(all_subsets, angles_muscle, all_subset_labels, all_subset_colors)
+    plt.ylim([0, 1.5])
+    plt.xticks([])
     save_fig(os.path.join(exp_path, epoch, "muscle_angles"), eps=True)
 
     # ------------------------------------------------------------- NEURAL SHAPES
@@ -1164,13 +1117,12 @@ def _trajectory_alignment(model_name, epoch):
     # Create figure and 3D axes
     fig = plt.figure(figsize=(4, 4))
     ax = fig.add_subplot(111)  # or projection='3d'
-    ax.set_xlim(0, 0.8)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    for subset in all_subsets:
-        _plot_task_subsets(all_subsets[subset], shapes_h, subset, color=all_subsets_colors[subset])
-    _plot_task_subsets(combination_labels, shapes_h, "All Combinations", color="grey")
+    _plot_task_subsets(all_subsets, shapes_h, all_subset_labels, all_subset_colors)
+    plt.ylim([0, 1])
+    plt.xticks([])
     save_fig(os.path.join(exp_path, epoch, "neural_shapes"), eps=True)
 
     # ------------------------------------------------------------- MUSCLE SHAPES
@@ -1178,13 +1130,12 @@ def _trajectory_alignment(model_name, epoch):
     # Create figure and 3D axes
     fig = plt.figure(figsize=(4, 4))
     ax = fig.add_subplot(111)  # or projection='3d'
-    ax.set_xlim(0, 0.8)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    for subset in all_subsets:
-        _plot_task_subsets(all_subsets[subset], shapes_muscle, subset, color=all_subsets_colors[subset])
-    _plot_task_subsets(combination_labels, shapes_muscle, "All Combinations", color="grey")
+    _plot_task_subsets(all_subsets, shapes_muscle, all_subset_labels, all_subset_colors)
+    plt.ylim([0, 1])
+    plt.xticks([])
     save_fig(os.path.join(exp_path, epoch, "muscle_shapes"), eps=True)
 
     all_distances_h = _convert_motif_dict_to_list(combination_labels, distances_h)
@@ -1196,39 +1147,7 @@ def _trajectory_alignment(model_name, epoch):
     all_shapes_h = _convert_motif_dict_to_list(combination_labels, shapes_h)
     all_shapes_muscle = _convert_motif_dict_to_list(combination_labels, shapes_muscle)
 
-    # -------------------------------------- NEURAL SHAPE VS MUSCLE SHAPE
-
-    # create figure and 3d axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    shape_regress = scipy.stats.linregress(all_shapes_h, all_shapes_muscle)
-    cc_shape = shape_regress.rvalue
-    print("cc neural shape to muscle shape: ", cc_shape)
-    x = np.linspace(0, max(all_shapes_h))
-    ax.plot(x, shape_regress.slope * x + shape_regress.intercept, linestyle="dashed", color="grey")
-    ax.scatter(all_shapes_h, all_shapes_muscle, s=100, alpha=0.5, color="purple")
-    save_fig(os.path.join(exp_path, epoch, "neural_shape_vs_muscle_shape"), eps=True)
-
-    # -------------------------------------- NEURAL SHAPE VS NEURAL ANGLE
-
-    # create figure and 3d axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    shape_regress = scipy.stats.linregress(all_angles_h, all_shapes_h)
-    cc_shape = shape_regress.rvalue
-    print("cc neural shape to neural angle: ", cc_shape)
-    x = np.linspace(0, max(all_angles_h))
-    ax.plot(x, shape_regress.slope * x + shape_regress.intercept, linestyle="dashed", color="grey")
-    ax.scatter(all_angles_h, all_shapes_h, s=100, alpha=0.5, color="purple")
-    save_fig(os.path.join(exp_path, epoch, "neural_angle_vs_neural_shape"), eps=True)
-
-    # -------------------------------------- NEURAL DISTANCE VS MUSCLE DISTANCE
+    # -------------------------------------- NEURAL AND MUSCLE SHAPE DISTRIBUTIONS
 
     # Create figure and 3D axes
     fig = plt.figure(figsize=(4, 4))
@@ -1236,13 +1155,15 @@ def _trajectory_alignment(model_name, epoch):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    diff_regress = scipy.stats.linregress(all_distances_h, all_distances_muscle)
-    cc_diff = diff_regress.rvalue
-    print("CC neural diff to muscle diff: ", cc_diff)
-    x = np.linspace(0, max(all_distances_h))
-    ax.plot(x, diff_regress.slope * x + diff_regress.intercept, linestyle="dashed", color="grey")
-    ax.scatter(all_distances_h, all_distances_muscle, s=100, alpha=0.5, color="purple")
-    save_fig(os.path.join(exp_path, epoch, "neural_diff_vs_muscle_diff"), eps=True)
+    neural_shape_mean = sum(all_shapes_h) / len(all_shapes_h)
+    muscle_shape_mean = sum(all_shapes_muscle) / len(all_shapes_muscle)
+
+    sns.kdeplot(all_shapes_h, color="blue", fill=True, zorder=10, legend=False, linewidth=2, alpha=0.25)
+    sns.kdeplot(all_shapes_muscle, color="purple", fill=True, zorder=10, legend=False, linewidth=2, alpha=0.25)
+    plt.axvline(neural_shape_mean, color="blue", linestyle="dashed", linewidth=2)
+    plt.axvline(muscle_shape_mean, color="purple", linestyle="dashed", linewidth=2)
+    plt.xlim([0, 1])
+    save_fig(os.path.join(exp_path, epoch, "neural_muscle_shape_dists"), eps=True)
 
     # -------------------------------------- NEURAL DISTANCE VS NEURAL ANGLE
 
@@ -1288,11 +1209,11 @@ def _trajectory_alignment(model_name, epoch):
     cc_diff = diff_regress.rvalue
     print("CC neural angle to muscle angle: ", cc_diff)
     x = np.linspace(0, max(all_angles_h))
-    ax.plot(x, diff_regress.slope * x + diff_regress.intercept, linestyle="dashed", color="grey")
-    ax.scatter(all_angles_h, all_angles_muscle, s=100, alpha=0.5, color="purple")
+    ax.plot(x, diff_regress.slope * x + diff_regress.intercept, color="black")
+    ax.scatter(all_angles_h, all_angles_muscle, s=50, alpha=0.25, color="grey")
     save_fig(os.path.join(exp_path, epoch, "neural_angle_vs_muscle_angle"), eps=True)
 
-    # -------------------------------------- NEURAL DISTANCE VS MUSCLE SHAPE
+    # -------------------------------------- NEURAL ANGLE VS MUSCLE SHAPE
 
     # Create figure and 3D axes
     fig = plt.figure(figsize=(4, 4))
@@ -1300,15 +1221,15 @@ def _trajectory_alignment(model_name, epoch):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    diff_regress = scipy.stats.linregress(all_distances_h, all_shapes_muscle)
+    diff_regress = scipy.stats.linregress(all_angles_h, all_shapes_muscle)
     cc_diff = diff_regress.rvalue
-    print("CC neural diff to muscle shape: ", cc_diff)
-    x = np.linspace(0, max(all_distances_h))
-    ax.plot(x, diff_regress.slope * x + diff_regress.intercept, linestyle="dashed", color="grey")
-    ax.scatter(all_distances_h, all_shapes_muscle, s=100, alpha=0.5, color="purple")
-    save_fig(os.path.join(exp_path, epoch, "neural_diff_vs_muscle_shape"), eps=True)
+    print("CC neural angle to muscle shape: ", cc_diff)
+    x = np.linspace(0, max(all_angles_h))
+    ax.plot(x, diff_regress.slope * x + diff_regress.intercept, color="black")
+    ax.scatter(all_angles_h, all_shapes_muscle, s=50, alpha=0.25, color="grey")
+    save_fig(os.path.join(exp_path, epoch, "neural_angle_vs_muscle_shape"), eps=True)
 
-    # -------------------------------------- NEURAL SHAPE VS MUSCLE DISTANCE
+    # -------------------------------------- MUSCLE SHAPE VS NEURAL SHAPE
 
     # Create figure and 3D axes
     fig = plt.figure(figsize=(4, 4))
@@ -1316,13 +1237,29 @@ def _trajectory_alignment(model_name, epoch):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    shape_regress = scipy.stats.linregress(all_shapes_h, all_distances_muscle)
-    cc_diff = shape_regress.rvalue
-    print("CC neural shape to muscle diff: ", cc_diff)
+    diff_regress = scipy.stats.linregress(all_shapes_muscle, all_shapes_h)
+    cc_diff = diff_regress.rvalue
+    print("CC muscle shape to neural shape: ", cc_diff)
+    x = np.linspace(0, max(all_shapes_muscle))
+    ax.plot(x, diff_regress.slope * x + diff_regress.intercept, color="black")
+    ax.scatter(all_shapes_muscle, all_shapes_h, s=50, alpha=0.25, color="grey")
+    save_fig(os.path.join(exp_path, epoch, "muscle_shape_vs_neural_shape"), eps=True)
+
+    # -------------------------------------- NEURAL SHAPE VS MUSCLE ANGLE
+
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111)  # or projection='3d'
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    diff_regress = scipy.stats.linregress(all_shapes_h, all_angles_muscle)
+    cc_diff = diff_regress.rvalue
+    print("CC neural shape to muscle angle: ", cc_diff)
     x = np.linspace(0, max(all_shapes_h))
-    ax.plot(x, shape_regress.slope * x + shape_regress.intercept, linestyle="dashed", color="grey")
-    ax.scatter(all_shapes_h, all_distances_muscle, s=100, alpha=0.5, color="purple")
-    save_fig(os.path.join(exp_path, epoch, "neural_shape_vs_muscle_diff"), eps=True)
+    ax.plot(x, diff_regress.slope * x + diff_regress.intercept, color="black")
+    ax.scatter(all_shapes_h, all_angles_muscle, s=50, alpha=0.25, color="grey")
+    save_fig(os.path.join(exp_path, epoch, "neural_shape_vs_muscle_angle"), eps=True)
 
 
 
@@ -1333,6 +1270,419 @@ def trajectory_alignment_delay(model_name):
     _trajectory_alignment(model_name, "delay")
 
 
+
+
+def _project_pca_combination(data):
+
+    # Data is currently a tuple containing two tensors for the hs of two tasks
+    # across all conditions
+
+    pc_dict = {}
+
+    for (task1_cond, task2_cond) in zip(data[0], data[1]):
+
+        task1_pca = PCA(n_components=5)
+        task2_pca = PCA(n_components=5)
+
+        task1_pca.fit(task1_cond)
+        task2_pca.fit(task2_cond)
+
+        task1_cond_var = task1_cond.var(dim=0).sum()
+        task2_cond_var = task2_cond.var(dim=0).sum()
+
+        for pc in range(5):
+
+            pc_dict[pc] = []
+            # Now get variance explained projecting between tasks
+            task2_pca_comp = task2_pca.components_[pc]
+            var_explained_task1 = (task1_cond @ task2_pca_comp).var(dim=0) / task2_cond_var
+            pc_dict[pc].append(var_explained_task1)
+
+            task1_pca_comp = task1_pca.components_[pc]
+            var_explained_task2 = (task2_cond @ task1_pca_comp).var(dim=0) / task1_cond_var
+            pc_dict[pc].append(var_explained_task2)
+    
+    return pc_dict
+
+
+def _get_ve_combination(combinations, data):
+
+    # Initialize the full pc dict
+    all_pc_dict = {}
+    for i in range(1, 6):
+        all_pc_dict[i] = []
+
+    for combination in combinations:
+        if combination in data:
+            # This should return a list of the variance explained for each pc
+            tmp_pc_dict = _project_pca_combination(data[combination])
+        elif (combination[1], combination[0]) in data:
+            tmp_pc_dict = _project_pca_combination(data[(combination[1]), combination[0]])
+        
+        # Go through all pcs and add to full pc dict
+        for pc in tmp_pc_dict:
+            all_pc_dict[pc+1].extend(tmp_pc_dict[pc])
+    
+    return all_pc_dict
+
+
+def mode_shift(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/compositionality/mode_shift"
+
+    options = {"batch_size": 32, "reach_conds": np.tile(np.arange(0, 32, 1), int(32/32)), "speed_cond": 5}
+
+    trial_data_h = {}
+    trial_data_muscle = {}
+    combinations_h = {}
+    combinations_muscle = {}
+    for env in env_dict:
+
+        trial_data = _test(model_path, model_file, options, env=env_dict[env], noise=False)
+
+        if env == "DlyFullReach" or env == "DlyFullCircleClk" or env == "DlyFullCircleCClk" or env == "DlyFigure8" or env == "DlyFigure8Inv":
+            halfway = int((trial_data["epoch_bounds"]["movement"][0] + trial_data["epoch_bounds"]["movement"][1]) / 2)
+            trial_data_h[env+"1"] = trial_data["h"][:, trial_data["epoch_bounds"]["movement"][0]:halfway]
+            trial_data_h[env+"2"] = trial_data["h"][:, halfway:trial_data["epoch_bounds"]["movement"][1]]
+        
+        else:
+            trial_data_h[env] = trial_data["h"][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
+        
+
+    # Get all unique pairs of unit activity across tasks
+    combination_labels = list(itertools.combinations(trial_data_h, 2))
+    for combination_label in combination_labels:
+        combinations_h[combination_label] = (
+            trial_data_h[combination_label[0]],
+            trial_data_h[combination_label[1]]
+        )
+
+    all_subsets = {
+        "inverse_tasks": inverse_tasks, 
+        "subset_forward_tasks": subset_forward_tasks, 
+        "subset_backward_tasks": subset_backward_tasks, 
+    }
+
+    all_subsets_colors = {
+        "inverse_tasks": "blue",
+        "subset_forward_tasks": "purple",
+        "subset_backward_tasks": "orange"
+    }
+
+    subset_pc_dict = {}
+    for subset in all_subsets:
+        subset_pc_dict[subset] = _get_ve_combination(all_subsets[subset], combinations_h)
+    
+    data = []
+    for cond in subset_pc_dict:
+        for group in subset_pc_dict[cond]:
+            for v in subset_pc_dict[cond][group]:
+                data.append({'Group': f"PC {group}", 'Condition': cond, 'Value': v.item()})
+
+    df = pd.DataFrame(data)
+
+    # Aggregate for bar plot (e.g., mean value per group/condition)
+    means = bar_df = df.groupby(['Group', 'Condition'], observed=True)["Value"].mean().reset_index()
+
+    # Set the custom order for 'Group' and 'Condition'
+    group_order = ['PC 1', 'PC 2', 'PC 3', 'PC 4', 'PC 5']
+    condition_order = ['subset_forward_tasks', 'inverse_tasks', 'subset_backward_tasks']
+
+    # Reorder the 'Group' and 'Condition' columns as categorical with a specified order
+    means['Group'] = pd.Categorical(means['Group'], categories=group_order, ordered=True)
+    means['Condition'] = pd.Categorical(means['Condition'], categories=condition_order, ordered=True)
+
+
+    # ------------------------------------------------------------- NEURAL DISTANCES
+
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(6, 4))
+    ax = fig.add_subplot(111)  # or projection='3d'
+    sns.reset_defaults()
+
+    ax = sns.barplot(data=bar_df, x='Group', y='Value', hue='Condition',
+        palette=all_subsets_colors, dodge=True)
+    # Remove everything
+    #ax.set(xlabel=None, ylabel=None)
+    #ax.set_xticks([])
+    #ax.get_legend().remove()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    save_fig(os.path.join(exp_path, "pc_shift"), eps=True)
+
+
+
+
+
+def _get_pa_combination(combination_labels, data):
+
+    # Initialize the full pc dict
+    all_pc_list_means = []
+    all_pc_list_stds = []
+
+    data_tuples = []
+    for combination in combination_labels:
+        if combination in data:
+            # This should return a list of the variance explained for each pc
+            data_tuples.append(data[combination])
+        elif (combination[1], combination[0]) in data:
+            data_tuples.append(data[(combination[1]), combination[0]])
+
+    for pc in range(1, 13):
+
+        # This should return a list of the variance explained for each pc
+        tmp_angles_dict = principal_angles(data_tuples, combination_labels, mode="h", num_comps=pc, control=False)
+
+        combination_list = []
+        for combination in tmp_angles_dict:
+            # this should go through each combination and get the lowest angle
+            combination_list.append(tmp_angles_dict[combination][0])
+        all_pc_list_means.append(np.array(combination_list).mean())
+        all_pc_list_stds.append(np.array(combination_list).std())
+    
+    return np.array(all_pc_list_means), np.array(all_pc_list_stds)
+
+
+def task_principle_angles(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/compositionality/task_pc_angles"
+
+    options = {"batch_size": 32, "reach_conds": np.tile(np.arange(0, 32, 1), int(32/32)), "speed_cond": 5}
+
+    trial_data_h = {}
+    trial_data_muscle = {}
+    combinations_h = {}
+    combinations_muscle = {}
+    for env in env_dict:
+
+        trial_data = _test(model_path, model_file, options, env=env_dict[env], noise=False)
+
+        if env == "DlyFullReach" or env == "DlyFullCircleClk" or env == "DlyFullCircleCClk" or env == "DlyFigure8" or env == "DlyFigure8Inv":
+            halfway = int((trial_data["epoch_bounds"]["movement"][0] + trial_data["epoch_bounds"]["movement"][1]) / 2)
+            trial_data_h[env+"1"] = trial_data["h"][:, trial_data["epoch_bounds"]["movement"][0]:halfway]
+            trial_data_h[env+"2"] = trial_data["h"][:, halfway:trial_data["epoch_bounds"]["movement"][1]]
+        
+        else:
+            trial_data_h[env] = trial_data["h"][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
+        
+
+    # Get all unique pairs of unit activity across tasks
+    combination_labels = list(itertools.combinations(trial_data_h, 2))
+    for combination_label in combination_labels:
+        combinations_h[combination_label] = (
+            trial_data_h[combination_label[0]],
+            trial_data_h[combination_label[1]]
+        )
+
+    all_subsets = {
+        "inverse_tasks": inverse_tasks, 
+        "subset_forward_tasks": subset_forward_tasks, 
+        "subset_backward_tasks": subset_backward_tasks, 
+    }
+
+    all_subsets_colors = {
+        "inverse_tasks": "blue",
+        "subset_forward_tasks": "purple",
+        "subset_backward_tasks": "orange"
+    }
+
+    subset_pc_dict_means = {}
+    subset_pc_dict_stds = {}
+    for subset in all_subsets:
+        subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = _get_pa_combination(all_subsets[subset], combinations_h)
+    
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111)  # or projection='3d'
+
+    x = np.arange(1, 13)
+    for subset in subset_pc_dict_means:
+        ax.plot(x, subset_pc_dict_means[subset], linewidth=4, marker='o', markersize=15, alpha=0.5, color=all_subsets_colors[subset])
+        ax.fill_between(
+            x, 
+            subset_pc_dict_means[subset] - subset_pc_dict_stds[subset], 
+            subset_pc_dict_means[subset] + subset_pc_dict_stds[subset], 
+            color=all_subsets_colors[subset], 
+            alpha=0.25
+        )
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    save_fig(os.path.join(exp_path, "pc_angles"), eps=True)
+
+
+
+
+
+def _get_vaf_combination(combination_labels, data, mode, comp_range):
+
+    # Initialize the full pc dict
+    all_vaf_list_means = []
+    all_vaf_list_stds = []
+
+    condition_tuple_dict = {}
+    condition_label_dict = {}
+
+    for combination in combination_labels:
+        if combination not in data:
+            combination = (combination[1], combination[0])
+        for c, (task1_condition, task2_condition) in enumerate(zip(data[combination][0], data[combination][1])):
+            if c not in condition_tuple_dict:
+                condition_tuple_dict[c] = []
+                condition_label_dict[c] = []
+            # This should return a list of the variance explained for each pc
+            condition_tuple_dict[c].append((task1_condition, task2_condition))
+            condition_label_dict[c].append(combination)
+
+    for pc in range(1, comp_range):
+        condition_vaf_list = []
+        for condition in condition_tuple_dict.values():
+            # This should return a list of the variance explained for each pc
+            ratio_list = vaf_ratio(condition, mode=mode, num_comps=pc, control=False)
+            condition_vaf_list.extend(ratio_list)
+        all_vaf_list_means.append(np.array(condition_vaf_list).mean())
+        all_vaf_list_stds.append(np.array(condition_vaf_list).std())
+    
+    return np.array(all_vaf_list_means), np.array(all_vaf_list_stds)
+
+
+def task_vaf_ratio(model_name):
+
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/compositionality/task_vaf_ratio"
+
+    options = {"batch_size": 32, "reach_conds": np.tile(np.arange(0, 32, 1), int(32/32)), "speed_cond": 5}
+
+    trial_data_h = {}
+    trial_data_muscle = {}
+    combinations_h = {}
+    combinations_muscle = {}
+    for env in env_dict:
+
+        trial_data = _test(model_path, model_file, options, env=env_dict[env], noise=False)
+
+        if env == "DlyFullReach" or env == "DlyFullCircleClk" or env == "DlyFullCircleCClk" or env == "DlyFigure8" or env == "DlyFigure8Inv":
+
+            halfway = int((trial_data["epoch_bounds"]["movement"][0] + trial_data["epoch_bounds"]["movement"][1]) / 2)
+
+            trial_data_h[env+"1"] = trial_data["h"][:, trial_data["epoch_bounds"]["movement"][0]:halfway]
+            trial_data_h[env+"2"] = trial_data["h"][:, halfway:trial_data["epoch_bounds"]["movement"][1]]
+
+            trial_data_muscle[env+"1"] = trial_data["muscle_acts"][:, trial_data["epoch_bounds"]["movement"][0]:halfway]
+            trial_data_muscle[env+"2"] = trial_data["muscle_acts"][:, halfway:trial_data["epoch_bounds"]["movement"][1]]
+        
+        else:
+
+            trial_data_h[env] = trial_data["h"][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
+            trial_data_muscle[env] = trial_data["muscle_acts"][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
+        
+
+    # Get all unique pairs of unit activity across tasks
+    combination_labels = list(itertools.combinations(trial_data_h, 2))
+    for combination_label in combination_labels:
+        combinations_h[combination_label] = (
+            trial_data_h[combination_label[0]],
+            trial_data_h[combination_label[1]]
+        )
+        combinations_muscle[combination_label] = (
+            trial_data_muscle[combination_label[0]],
+            trial_data_muscle[combination_label[1]]
+        )
+
+    all_subsets = {
+        "extension_tasks": extension_tasks, 
+        "retraction_tasks": retraction_tasks, 
+        "subset_tasks": subset_tasks, 
+        "extension_retraction_tasks": extension_retraction_tasks, 
+    }
+
+    all_subsets_colors = {
+        "extension_tasks": "blue",
+        "retraction_tasks": "pink",
+        "subset_tasks": "purple",
+        "extension_retraction_tasks": "orange"
+    }
+
+    comp_range = 51
+
+    # Plotting vaf for different number of pc components neural
+
+    subset_pc_dict_means = {}
+    subset_pc_dict_stds = {}
+    for subset in all_subsets:
+        subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = _get_vaf_combination(all_subsets[subset], combinations_h, "h", comp_range)
+    all_task_pc_means, all_task_pc_stds = _get_vaf_combination(combination_labels, combinations_h, "h", comp_range)
+    
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111)  # or projection='3d'
+
+    x = np.arange(1, comp_range)
+    for subset in subset_pc_dict_means:
+        ax.plot(x, subset_pc_dict_means[subset], linewidth=4, marker='o', markersize=15, alpha=0.5, color=all_subsets_colors[subset])
+        ax.fill_between(
+            x, 
+            subset_pc_dict_means[subset] - subset_pc_dict_stds[subset], 
+            subset_pc_dict_means[subset] + subset_pc_dict_stds[subset], 
+            color=all_subsets_colors[subset], 
+            alpha=0.25
+        )
+    ax.plot(x, all_task_pc_means, linewidth=4, marker='o', markersize=15, alpha=0.75, color="grey")
+    ax.fill_between(
+        x, 
+        all_task_pc_means - all_task_pc_stds, 
+        all_task_pc_means + all_task_pc_stds, 
+        color="grey", 
+        alpha=0.25
+    )
+
+    comp_range = 7
+
+    ax.set_ylim([0, 1.1])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    save_fig(os.path.join(exp_path, "vaf_ratio_neural"), eps=True)
+
+    # Plotting vaf for different number of pc components muscle
+
+    subset_pc_dict_means = {}
+    subset_pc_dict_stds = {}
+    for subset in all_subsets:
+        subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = _get_vaf_combination(all_subsets[subset], combinations_muscle, "muscle_acts", comp_range)
+    all_task_pc_means, all_task_pc_stds = _get_vaf_combination(combination_labels, combinations_muscle, "muscle_acts", comp_range)
+    
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111)  # or projection='3d'
+
+    x = np.arange(1, comp_range)
+    for subset in subset_pc_dict_means:
+        ax.plot(x, subset_pc_dict_means[subset], linewidth=4, marker='o', markersize=15, alpha=0.5, color=all_subsets_colors[subset])
+        ax.fill_between(
+            x, 
+            subset_pc_dict_means[subset] - subset_pc_dict_stds[subset], 
+            subset_pc_dict_means[subset] + subset_pc_dict_stds[subset], 
+            color=all_subsets_colors[subset], 
+            alpha=0.25
+        )
+    ax.plot(x, all_task_pc_means, linewidth=4, marker='o', markersize=15, alpha=0.75, color="grey")
+    ax.fill_between(
+        x, 
+        all_task_pc_means - all_task_pc_stds, 
+        all_task_pc_means + all_task_pc_stds, 
+        color="grey", 
+        alpha=0.25
+    )
+
+    ax.set_ylim([0, 1.1])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    save_fig(os.path.join(exp_path, "vaf_ratio_muscle"), eps=True)
 
 
 if __name__ == "__main__":
@@ -1349,33 +1699,8 @@ if __name__ == "__main__":
 
     # --------------------------------------------------------- COMPUTE INTERPOLATED FPS
 
-    elif args.experiment == "compute_interpolated_fps_halfreach_fullreach_delay":
-        compute_interpolated_fps_halfreach_fullreach_delay(args.model_name)
-    elif args.experiment == "compute_interpolated_fps_halfreach_fullreach_delay_rule":
-        compute_interpolated_fps_halfreach_fullreach_delay_rule(args.model_name)
-    elif args.experiment == "compute_interpolated_fps_halfreach_fullreach_delay_proprioception":
-        compute_interpolated_fps_halfreach_fullreach_delay_proprioception(args.model_name)
-
-    elif args.experiment == "compute_interpolated_fps_halfreach_fullreach_movement":
-        compute_interpolated_fps_halfreach_fullreach_movement(args.model_name)
-    elif args.experiment == "compute_interpolated_fps_halfreach_fullreach_movement_rule":
-        compute_interpolated_fps_halfreach_fullreach_movement_rule(args.model_name)
-    elif args.experiment == "compute_interpolated_fps_halfreach_fullreach_movement_proprioception":
-        compute_interpolated_fps_halfreach_fullreach_movement_proprioception(args.model_name)
-
-    elif args.experiment == "compute_interpolated_fps_halfcircleclk_figure8inv_delay":
-        compute_interpolated_fps_halfcircleclk_figure8inv_delay(args.model_name)
-    elif args.experiment == "compute_interpolated_fps_halfcircleclk_figure8inv_delay_rule":
-        compute_interpolated_fps_halfcircleclk_figure8inv_delay_rule(args.model_name)
-    elif args.experiment == "compute_interpolated_fps_halfcircleclk_figure8inv_delay_proprioception":
-        compute_interpolated_fps_halfcircleclk_figure8inv_delay_proprioception(args.model_name)
-
-    elif args.experiment == "compute_interpolated_fps_halfcircleclk_figure8inv_movement":
-        compute_interpolated_fps_halfcircleclk_figure8inv_movement(args.model_name)
-    elif args.experiment == "compute_interpolated_fps_halfcircleclk_figure8inv_movement_rule":
-        compute_interpolated_fps_halfcircleclk_figure8inv_movement_rule(args.model_name)
-    elif args.experiment == "compute_interpolated_fps_halfcircleclk_figure8inv_movement_proprioception":
-        compute_interpolated_fps_halfcircleclk_figure8inv_movement_proprioception(args.model_name)
+    elif args.experiment == "run_all_compute_interpolated_fps":
+        run_all_compute_interpolated_fps(args.model_name)
 
     # --------------------------------------------------------- PLOT INTERPOLATED FPS
 
@@ -1407,71 +1732,8 @@ if __name__ == "__main__":
     elif args.experiment == "plot_interpolated_fps_halfcircleclk_figure8inv_movement_proprioception":
         plot_interpolated_fps_halfcircleclk_figure8inv_movement_proprioception(args.model_name)
 
-    # --------------------------------------------------------- NEURAL MANIFOLD TRAVERSAL
-
-    elif args.experiment == "neural_manifold_traversal_halfreach_fullreach_delay":
-        neural_manifold_traversal_halfreach_fullreach_delay(args.model_name)
-    elif args.experiment == "neural_manifold_traversal_halfreach_fullreach_delay_rule":
-        neural_manifold_traversal_halfreach_fullreach_delay_rule(args.model_name)
-    elif args.experiment == "neural_manifold_traversal_halfreach_fullreach_delay_proprioception":
-        neural_manifold_traversal_halfreach_fullreach_delay_proprioception(args.model_name)
-
-    elif args.experiment == "neural_manifold_traversal_halfreach_fullreach_movement":
-        neural_manifold_traversal_halfreach_fullreach_movement(args.model_name)
-    elif args.experiment == "neural_manifold_traversal_halfreach_fullreach_movement_rule":
-        neural_manifold_traversal_halfreach_fullreach_movement_rule(args.model_name)
-    elif args.experiment == "neural_manifold_traversal_halfreach_fullreach_movement_proprioception":
-        neural_manifold_traversal_halfreach_fullreach_movement_proprioception(args.model_name)
-
-    elif args.experiment == "neural_manifold_traversal_halfcircleclk_figure8inv_delay":
-        neural_manifold_traversal_halfcircleclk_figure8inv_delay(args.model_name)
-    elif args.experiment == "neural_manifold_traversal_halfcircleclk_figure8inv_delay_rule":
-        neural_manifold_traversal_halfcircleclk_figure8inv_delay_rule(args.model_name)
-    elif args.experiment == "neural_manifold_traversal_halfcircleclk_figure8inv_delay_proprioception":
-        neural_manifold_traversal_halfcircleclk_figure8inv_delay_proprioception(args.model_name)
-
-    elif args.experiment == "neural_manifold_traversal_halfcircleclk_figure8inv_movement":
-        neural_manifold_traversal_halfcircleclk_figure8inv_movement(args.model_name)
-    elif args.experiment == "neural_manifold_traversal_halfcircleclk_figure8inv_movement_rule":
-        neural_manifold_traversal_halfcircleclk_figure8inv_movement_rule(args.model_name)
-    elif args.experiment == "neural_manifold_traversal_halfcircleclk_figure8inv_movement_proprioception":
-        neural_manifold_traversal_halfcircleclk_figure8inv_movement_proprioception(args.model_name)
-
-    # --------------------------------------------------------- MOTOR MANIFOLD TRAVERSAL
-
-    elif args.experiment == "motor_manifold_traversal_halfreach_fullreach_delay":
-        motor_manifold_traversal_halfreach_fullreach_delay(args.model_name)
-    elif args.experiment == "motor_manifold_traversal_halfreach_fullreach_delay_rule":
-        motor_manifold_traversal_halfreach_fullreach_delay_rule(args.model_name)
-    elif args.experiment == "motor_manifold_traversal_halfreach_fullreach_delay_proprioception":
-        motor_manifold_traversal_halfreach_fullreach_delay_proprioception(args.model_name)
-
-    elif args.experiment == "motor_manifold_traversal_halfreach_fullreach_movement":
-        motor_manifold_traversal_halfreach_fullreach_movement(args.model_name)
-    elif args.experiment == "motor_manifold_traversal_halfreach_fullreach_movement_rule":
-        motor_manifold_traversal_halfreach_fullreach_movement_rule(args.model_name)
-    elif args.experiment == "motor_manifold_traversal_halfreach_fullreach_movement_proprioception":
-        motor_manifold_traversal_halfreach_fullreach_movement_proprioception(args.model_name)
-
-    elif args.experiment == "motor_manifold_traversal_halfcircleclk_figure8inv_delay":
-        motor_manifold_traversal_halfcircleclk_figure8inv_delay(args.model_name)
-    elif args.experiment == "motor_manifold_traversal_halfcircleclk_figure8inv_delay_rule":
-        motor_manifold_traversal_halfcircleclk_figure8inv_delay_rule(args.model_name)
-    elif args.experiment == "motor_manifold_traversal_halfcircleclk_figure8inv_delay_proprioception":
-        motor_manifold_traversal_halfcircleclk_figure8inv_delay_proprioception(args.model_name)
-
-    elif args.experiment == "motor_manifold_traversal_halfcircleclk_figure8inv_movement":
-        motor_manifold_traversal_halfcircleclk_figure8inv_movement(args.model_name)
-    elif args.experiment == "motor_manifold_traversal_halfcircleclk_figure8inv_movement_rule":
-        motor_manifold_traversal_halfcircleclk_figure8inv_movement_rule(args.model_name)
-    elif args.experiment == "motor_manifold_traversal_halfcircleclk_figure8inv_movement_proprioception":
-        motor_manifold_traversal_halfcircleclk_figure8inv_movement_proprioception(args.model_name)
-    elif args.experiment == "run_all_manifold_traversal":
-        run_all_manifold_traversal(args.model_name)
     elif args.experiment == "run_all_plot_interpolated_fps":
         run_all_plot_interpolated_fps(args.model_name)
-    elif args.experiment == "run_all_compute_interpolated_fps":
-        run_all_compute_interpolated_fps(args.model_name)
     elif args.experiment == "compute_input_switching":
         compute_input_switching(args.model_name)
     elif args.experiment == "plot_input_switching":
@@ -1500,5 +1762,13 @@ if __name__ == "__main__":
         neural_epoch_pcs_halfcircleclk_figure8inv(args.model_name)
     elif args.experiment == "neural_epoch_pcs_halfreach_fullreach":
         neural_epoch_pcs_halfreach_fullreach(args.model_name)
+
+    elif args.experiment == "mode_shift":
+        mode_shift(args.model_name)
+    elif args.experiment == "task_principal_angles":
+        task_principle_angles(args.model_name)
+    elif args.experiment == "task_vaf_ratio":
+        task_vaf_ratio(args.model_name)
+
     else:
         raise ValueError("Experiment not in this file")

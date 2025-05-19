@@ -6,6 +6,7 @@ import scipy
 from scipy.interpolate import interp1d
 import numpy as np
 import torch
+from matplotlib import rcParams
 
 def save_hp(hp, model_dir):
     """Save the hyper-parameter file of model save_name"""
@@ -25,7 +26,10 @@ def load_hp(model_dir):
         hp = json.load(f)
     return hp
 
-def save_fig(save_path, eps=False):
+def save_fig(save_path, eps=False): 
+    # Tell matplotlib to embed fonts as text, not outlines
+    rcParams['pdf.fonttype'] = 42  # 42 = TrueType (editable in Illustrator)
+    rcParams['ps.fonttype'] = 42
     # Simple function to save figure while creating dir and closing
     dir = os.path.dirname(save_path)
     create_dir(dir)

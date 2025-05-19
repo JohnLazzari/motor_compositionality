@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 
 from train import train_2link
 import motornet as mn
-from model import RNNPolicy, GRUPolicy
+from model import RNNPolicy, GRUPolicy, OrthogonalNet
 import torch
 import os
 from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
@@ -52,7 +52,19 @@ env_dict = {
 
 
 
-def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, noise=False, noise_act=0.1, noise_inp=0.01):
+def _test(
+    model_path, 
+    model_file, 
+    options, 
+    env, 
+    stim=None, 
+    feedback_mask=None, 
+    noise=False, 
+    noise_act=0.1, 
+    noise_inp=0.01,
+    add_new_rule_inputs=False,
+    num_new_inputs=10
+):
     """ Function will save all relevant data from a test run of a given env
 
     Args:
@@ -63,13 +75,13 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, n
         env (str, optional): _description_. Defaults to "RandomReach".
     """
 
-    hp = load_hp(model_path)
-    hp = hp.copy()
-    hp["batch_size"] = options["batch_size"]
-    
     device = "cpu"
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
     env = env(effector=effector)
+
+    hp = load_hp(model_path)
+    hp = hp.copy()
+    hp["batch_size"] = options["batch_size"]
 
     # Loading in model
     if hp["network"] == "rnn":
@@ -83,15 +95,18 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, n
             constrained=hp["constrained"], 
             dt=hp["dt"],
             t_const=hp["t_const"],
-            device=device
+            device=device,
+            add_new_rule_inputs=add_new_rule_inputs,
+            num_new_inputs=num_new_inputs
         )
+        checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
+        policy.load_state_dict(checkpoint['agent_state_dict'])
     elif hp["network"] == "gru":
         policy = GRUPolicy(hp["inp_size"], hp["hid_size"], effector.n_muscles, batch_first=True)
+        checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
+        policy.load_state_dict(checkpoint['agent_state_dict'])
     else:
         raise ValueError("Not a valid architecture")
-
-    checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
-    policy.load_state_dict(checkpoint['agent_state_dict'])
 
     # initialize batch
     x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
@@ -144,5 +159,4 @@ def _test(model_path, model_file, options, env, stim=None, feedback_mask=None, n
     trial_data["epoch_bounds"] = env.epoch_bounds
 
     return trial_data
-
 
