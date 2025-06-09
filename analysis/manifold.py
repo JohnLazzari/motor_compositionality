@@ -36,7 +36,7 @@ def principal_angles(combinations, combination_labels, mode, num_comps=None, con
             epoch: "delay" or "movement"
     """
 
-    angles_dict = {}
+    angles_list = []
     control_list = []
 
     if mode == "h":
@@ -74,7 +74,7 @@ def principal_angles(combinations, combination_labels, mode, num_comps=None, con
         inner_prod_mat = pca1_comps @ pca2_comps.T # Should be m x m
         U, s, Vh = np.linalg.svd(inner_prod_mat)
         angles = np.degrees(np.arccos(s))
-        angles_dict[combination_labels[i]] = angles
+        angles_list.append(angles)
 
     if control == True:
         # Get principle angles control
@@ -87,11 +87,11 @@ def principal_angles(combinations, combination_labels, mode, num_comps=None, con
             control_list.append(angles)
         control_array = np.stack(control_list, axis=0)
 
-        return angles_dict, control_array
+        return angles_list, control_array
     
     else:
 
-        return angles_dict
+        return angles_list
 
 
 

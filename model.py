@@ -23,7 +23,7 @@ class RNNPolicy(nn.Module):
             upper_bound_inp=10,
             device="cpu",
             add_new_rule_inputs=False,
-            num_new_inputs=20
+            num_new_inputs=10
         ):
         super().__init__()
 

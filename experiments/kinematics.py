@@ -109,13 +109,17 @@ def plot_task_kinematics_held_out_transfer(model_name):
         model_file (_type_): _description_
         exp_path (_type_): _description_
     """
-    model_path = f"checkpoints/{model_name}"
-    model_file = f"{model_name}.pth"
+    transfer_model_path = f"checkpoints/{model_name}"
+    transfer_model_file = f"{model_name}.pth"
+
+    held_out_model_path = f"checkpoints/rnn256_softplus_heldout"
+    held_out_model_file = f"rnn256_softplus_heldout.pth"
+
     exp_path = f"results/{model_name}/kinematics/held_out_transfer"
 
     env_dict = {
-        "DlySinusoidInv": DlySinusoidInv, 
-        "DlyFigure8Inv": DlyFigure8Inv,
+        "DlyHalfCircleCClk": DlyHalfCircleCClk,
+        "DlyFullCircleCClk": DlyFullCircleCClk
     }
 
     plt.rc('figure', figsize=(4, 4))
@@ -124,13 +128,14 @@ def plot_task_kinematics_held_out_transfer(model_name):
 
         options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": 5, "delay_cond": 1}
 
-        trial_data = _test(model_path, model_file, options, env=env_dict[env], add_new_rule_inputs=True)
+        transfer_trial_data = _test(transfer_model_path, transfer_model_file, options, env=env_dict[env], add_new_rule_inputs=True)
+        held_out_trial_data = _test(held_out_model_path, held_out_model_file, options, env=env_dict[env])
     
         # Get kinematics and activity in a center out setting
         # On random and delay
-        colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
+        colors = plt.cm.inferno(np.linspace(0, 1, transfer_trial_data["xy"].shape[0])) 
 
-        for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
+        for i, (tg, xy) in enumerate(zip(transfer_trial_data["tg"], transfer_trial_data["xy"])):
             plt.plot(xy[:, 0], xy[:, 1], linewidth=4, color=colors[i], alpha=0.75)
             plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=colors[i])
             plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color=colors[i])
@@ -140,24 +145,13 @@ def plot_task_kinematics_held_out_transfer(model_name):
         plt.gca().spines['right'].set_visible(False)
         save_fig(os.path.join(exp_path, "scatter", f"{env}_kinematics"), eps=True)
 
-        # Plot x coordinate only 
-        for i, xy in enumerate(trial_data["xy"]):
-            plt.plot(xy[:, 0], color=colors[i])
+        for i, (tg, xy) in enumerate(zip(held_out_trial_data["tg"], held_out_trial_data["xy"])):
+            plt.plot(xy[:, 0], xy[:, 1], linewidth=4, color=colors[i], linestyle="dashed", alpha=0.5)
 
         # Access current axes and hide top/right spines
         plt.gca().spines['top'].set_visible(False)
         plt.gca().spines['right'].set_visible(False)
-        save_fig(os.path.join(exp_path, "xpos", f"{env}_xpos"))
-
-        # Plot y coordinate only 
-        for i, xy in enumerate(trial_data["xy"]):
-            plt.plot(xy[:, 1], color=colors[i])
-
-        # Access current axes and hide top/right spines
-        plt.gca().spines['top'].set_visible(False)
-        plt.gca().spines['right'].set_visible(False)
-        save_fig(os.path.join(exp_path, "ypos", f"{env}_ypos"))
-
+        save_fig(os.path.join(exp_path, "scatter", f"{env}_before_kinematics"), eps=True)
 
 
 

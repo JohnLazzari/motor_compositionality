@@ -213,8 +213,10 @@ class DlyHalfReach(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, points.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         goal = points[point_idx] * 0.25 + fingertip
 
@@ -424,8 +426,10 @@ class DlyHalfCircleClk(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         # Rotate the points based on the chosen angles
         batch_angles = rot_angle[point_idx]
@@ -641,8 +645,10 @@ class DlyHalfCircleCClk(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
@@ -861,8 +867,10 @@ class DlySinusoid(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
@@ -1077,8 +1085,10 @@ class DlySinusoidInv(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
@@ -1291,8 +1301,10 @@ class DlyFullReach(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, points.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         goal = points[point_idx] * 0.25 + fingertip
 
@@ -1511,8 +1523,10 @@ class DlyFullCircleClk(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
@@ -1728,8 +1742,10 @@ class DlyFullCircleCClk(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
@@ -1952,8 +1968,10 @@ class DlyFigure8(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
@@ -2175,8 +2193,10 @@ class DlyFigure8Inv(env.Environment):
         if reach_conds is None:
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
-            # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            if isinstance(reach_conds, (int, float)):
+                point_idx = torch.tensor([reach_conds])
+            elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
+                point_idx = reach_conds
 
         batch_angles = rot_angle[point_idx]
         for i, theta in enumerate(batch_angles):
@@ -2324,7 +2344,7 @@ class ComposableEnv(env.Environment):
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             # tensor that will specify which of the 8 conditions to get
-            point_idx = reach_conds
+            point_idx = th.tensor([reach_conds])
 
         # Rotate the points based on the chosen angles
         batch_angles = rot_angle[point_idx]

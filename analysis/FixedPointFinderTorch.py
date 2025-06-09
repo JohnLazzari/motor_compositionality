@@ -297,12 +297,11 @@ class FixedPointFinderTorch(FixedPointFinderBase):
                 Both x(t) and x(t+1) have shape (n, n_states).
                 '''
 
-                # Unsqueeze to promote appropriate broadcasting
-                x_1xbxd = x_bxd.unsqueeze(0)
+                x_1xbxd = x_bxd
 
-                _, F_x_1xbxd = self.rnn(inputs_bx1xd, x_1xbxd)
+                _, F_x_1xbxd = self.rnn(inputs_bx1xd, x_1xbxd, x_1xbxd)
 
-                F_x_bxd = F_x_1xbxd.squeeze(0)
+                F_x_bxd = F_x_1xbxd.squeeze(1)
                 return F_x_bxd
 
             def batch_jacobian(f, x):
@@ -353,10 +352,10 @@ class FixedPointFinderTorch(FixedPointFinderBase):
 
             def forward_fn(x_d):
                 # Unsqueeze to promote appropriate broadcasting
-                x_1xbxd = x_d.unsqueeze(0).unsqueeze(1)
+                x_1xbxd = x_d.unsqueeze(0)
                 inputs_bx1xd = inputs_d.unsqueeze(0).unsqueeze(1)
 
-                _, F_x_1xbxd = self.rnn(inputs_bx1xd, x_1xbxd)
+                _, F_x_1xbxd = self.rnn(inputs_bx1xd, x_1xbxd, x_1xbxd)
 
                 F_x_d = F_x_1xbxd.squeeze()
                 return F_x_d
@@ -373,9 +372,8 @@ class FixedPointFinderTorch(FixedPointFinderBase):
 
         J_bxdxd = efficient_jacobian(x_bxd, inputs_bxd)
 
-
         # J_bxbxdxd = excessive_jacobian(x_bxd, inputs_bxd)
-        J_list = sequential_jacobian(x_bxd, inputs_bxd)
+        #J_list = sequential_jacobian(x_bxd, inputs_bxd)
 
         J_np = J_bxdxd.detach().cpu().numpy()
 

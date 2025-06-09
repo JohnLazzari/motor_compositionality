@@ -7,6 +7,7 @@ from scipy.interpolate import interp1d
 import numpy as np
 import torch
 from matplotlib import rcParams
+import itertools
 
 def save_hp(hp, model_dir):
     """Save the hyper-parameter file of model save_name"""
@@ -98,3 +99,29 @@ def random_orthonormal_basis(n, seed=None):
     Q *= signs
 
     return Q
+
+def standard_2d_ax():
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    return ax
+
+def pvalues(label_list, data_dict, metric):
+    combination_labels = list(itertools.combinations(label_list, 2))
+    print("\n")
+    # Print out significance here
+    for combination in combination_labels:
+        result = scipy.stats.mannwhitneyu(data_dict[combination[0]], data_dict[combination[1]])
+        pvalue = result[1]
+        if pvalue < 0.001:
+            pvalue_str = f"***, {pvalue}"
+        elif pvalue < 0.01:
+            pvalue_str = f"**, {pvalue}"
+        elif pvalue < 0.05:
+            pvalue_str = f"*, {pvalue}"
+        else:
+            pvalue_str = "Not Significant"
+        print(f"pvalue for {combination[0]} and {combination[1]} in metric {metric} is: {pvalue_str}")
+    print("\n")

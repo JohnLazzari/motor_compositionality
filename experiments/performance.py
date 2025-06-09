@@ -90,8 +90,8 @@ def plot_test_performance_held_out(model_name):
     exp_path = f"results/{model_name}/performance"
 
     env_list = [
-        "DlySinusoidInv",
-        "DlyFigure8Inv"
+        "DlyHalfCircleCClk",
+        "DlyFullCircleCClk"
     ]
 
     create_dir(exp_path)

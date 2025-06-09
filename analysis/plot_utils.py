@@ -159,7 +159,7 @@ def plot_fixed_point(fp, pca,
     do_plot_stable_modes=False, # (for unstable FPs)
     stable_color='k',
     stable_marker='.',
-    unstable_color='r',
+    unstable_color='w',
     unstable_marker=None,
     make_plot=True,
     **kwargs):
@@ -197,72 +197,9 @@ def plot_fixed_point(fp, pca,
 
     has_J = J is not None
 
-    if has_J:
-
-        if not fp.has_decomposed_jacobians:
-            ''' Ideally, never wind up here. Eigen decomposition is much faster in batch mode.'''
-            print('Decomposing Jacobians, one fixed point at time.')
-            print('\t warning: THIS CAN BE VERY SLOW.')
-            fp.decompose_Jacobians()
-
-        e_vals = fp.eigval_J_xstar[0]
-        e_vecs = fp.eigvec_J_xstar[0]
-
-        sorted_e_val_idx = np.argsort(np.abs(e_vals))
-
-        if max_n_modes > n_states:
-            max_n_modes = n_states
-
-        # Determine stability of fixed points
-        is_stable = np.all(np.abs(e_vals) < 1.0)
-
-        if is_stable:
-            color = stable_color
-            marker = stable_marker
-        else:
-            color = unstable_color
-            marker = unstable_marker
-    else:
-        color = stable_color
-        marker = stable_marker
-    
-    do_plot = (not has_J) or is_stable or do_plot_unstable_fps
+    do_plot = (not has_J) or do_plot_unstable_fps
 
     if do_plot:
-        if has_J:
-            for mode_idx in range(max_n_modes):
-                # -[1, 2, ..., max_n_modes]
-                idx = sorted_e_val_idx[-(mode_idx+1)]
-
-                # Magnitude of complex eigenvalue
-                e_val_mag = np.abs(e_vals[idx])
-
-                if e_val_mag > 1.0 or do_plot_stable_modes:
-
-                    # Already real. Cast to avoid warning.
-                    e_vec = np.real(e_vecs[:,idx])
-
-                    # [1 x d] numpy arrays
-                    xstar_plus = xstar + scale*e_val_mag*e_vec
-                    xstar_minus = xstar - scale*e_val_mag*e_vec
-
-                    # [3 x d] numpy array
-                    xstar_mode = np.vstack((xstar_minus, xstar, xstar_plus))
-
-                    if e_val_mag < 1.0:
-                        color = stable_color
-                    else:
-                        color = unstable_color
-
-                    if n_states >= 3 and pca is not None:
-                        # [3 x 3] numpy array
-                        zstar_mode = pca.transform(xstar_mode)
-                    else:
-                        zstar_mode = xstar_mode
-
-                    plot_123d(zstar_mode,
-                              color=color,
-                              **kwargs)
 
         if n_states >= 3 and pca is not None:
             zstar = pca.transform(xstar)
