@@ -14,7 +14,7 @@ import motornet as mn
 from model import RNNPolicy, GRUPolicy
 import torch
 import os
-from utils import load_hp, create_dir, save_fig, load_pickle, standard_2d_ax, pvalues
+from utils import load_hp, create_dir, save_fig, load_pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import config
@@ -28,7 +28,8 @@ import sklearn
 from sklearn.manifold import MDS
 from sklearn.linear_model import LinearRegression, Ridge
 import matplotlib.patches as mpatches
-from exp_utils import _test, env_dict
+from exp_utils import _test, env_dict, split_movement_epoch, get_interpolation_input, pvalues
+from exp_utils import distances_from_combinations, angles_from_combinations, shapes_from_combinations, convert_motif_dict_to_list
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import itertools
 import seaborn as sns
@@ -36,6 +37,7 @@ from DSA import DSA
 import scipy
 from utils import interpolate_trial
 import pandas as pd
+from plt_utils import standard_2d_ax, ax_3d_no_grid, empty_3d
 
 plt.rcParams.update({'font.size': 18})  # Sets default font size for all text
 
@@ -77,6 +79,9 @@ extension_half_combinations = list(itertools.combinations(extension_movements_ha
 extension_full_combinations = list(itertools.combinations(extension_movements_full, 2))
 extension_tasks = [*extension_half_combinations, *extension_full_combinations]
 
+#all_extensions = [*extension_movements_half, *extension_movements_full]
+#extension_tasks = list(itertools.combinations(all_extensions, 2))
+
 retraction_full_combinations = list(itertools.combinations(retraction_movements_full, 2))
 retraction_tasks = retraction_full_combinations
 
@@ -86,6 +91,15 @@ subset_tasks = [
     ("DlyHalfReach", "DlyFullReach1"),
     ("DlyHalfCircleCClk", "DlyFullCircleCClk1"),
     ("DlySinusoidInv", "DlyFigure8Inv1"),
+]
+
+rotated_tasks = [
+    ("DlyHalfCircleClk", "DlyHalfCircleCClk"),
+    ("DlySinusoid", "DlySinusoidInv"),
+    ("DlyFullCircleClk1", "DlyFullCircleCClk1"),
+    ("DlyFullCircleClk2", "DlyFullCircleCClk2"),
+    ("DlyFigure81", "DlyFigure8Inv1"),
+    ("DlyFigure82", "DlyFigure8Inv2"),
 ]
 
 extension_retraction_tasks = list(itertools.product(extension_movements_half, retraction_movements_full))
@@ -147,15 +161,9 @@ def _epoch_pcs(model_name, epoch, system):
     # Get kinematics and activity in a center out setting
     # On random and delay
     colors = plt.cm.tab10(np.linspace(0, 1, len(env_hs))) 
-
-    # Create a figure
-    fig = plt.figure()
-    fig.set_size_inches(4, 4)
-
-    # Add a 3D subplot
-    ax = fig.add_subplot(111, projection="3d")
-
     handles = []
+
+    fig, ax = ax_3d_no_grid()
 
     for i, (env_data, env) in enumerate(zip(env_hs, env_dict)):
 
@@ -171,49 +179,75 @@ def _epoch_pcs(model_name, epoch, system):
             ax.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], color=colors[i], s=25, alpha=0.1)
 
     # Set labels for axes
-    #plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    ax.grid(False)
     save_fig(os.path.join(exp_path, f"{system}_{epoch}_pcs"), eps=True)
 
 
 
 
-def _two_task_epoch_pcs(model_name, task1, task2, epoch, system):
+def _two_task_pcs(model_name, task1, task2, task1_period, task2_period, system):
 
+    # File names
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
     exp_path = f"results/{model_name}/compositionality/pcs"
-    pca_3d, env_hs = _get_pcs(model_name, batch_size=256, epoch=epoch, noise=True, system=system)
 
-    colors = plt.cm.tab10(np.linspace(0, 1, len(env_hs))) 
+    # testing options
+    options = {"batch_size": 32, "reach_conds": torch.arange(0, 32, 1), "delay_cond": 1, "speed_cond": 5}
+    colors = plt.cm.inferno(np.linspace(0, 1, 10)) 
 
-    # Create a figure
-    fig = plt.figure()
-    fig.set_size_inches(4, 4)
-    # Add a 3D subplot
-    ax = fig.add_subplot(111, projection="3d")
+    # Gather data from test runs
+    trial_data1 = _test(model_path, model_file, options, env=env_dict[task1], noise=False)
+    trial_data2 = _test(model_path, model_file, options, env=env_dict[task2], noise=False)
 
-    handles = []
-    task_projections = []
-    for i, (env_data, env) in enumerate(zip(env_hs, env_dict)):
-        if env == task1 or env == task2:
-            # Create patches with no border
-            handles.append(mpatches.Patch(color=colors[i], label=env, edgecolor='none'))
-            task_projections.append(env_data.squeeze())
-            for h in env_data:
-                # transform
-                h_proj = pca_3d.transform(h)
-                ax.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], color=colors[i], s=25, alpha=0.25)
+    # Get hidden activity during the first or second half of movement (or all)
+    trial_data1_h_epoch = split_movement_epoch(trial_data1, task1_period, system)
+    C_1, T_1, N_1 = trial_data1_h_epoch.shape
+    trial_data2_h_epoch = split_movement_epoch(trial_data2, task2_period, system)
+    C_2, T_2, N_2 = trial_data2_h_epoch.shape
+
+    # Combine all trials and timepoints then do PCA
+    combined_tasks = torch.cat([trial_data1_h_epoch, trial_data2_h_epoch], dim=1)
+    pca_3d = PCA(n_components=3)
+    pca_3d.fit(combined_tasks.reshape((-1, combined_tasks.shape[-1])))
+
+    # Transform to get low dimensional trajectories for both tasks
+    task1_projected = pca_3d.transform(trial_data1_h_epoch.reshape((-1, trial_data1_h_epoch.shape[-1]))).reshape((C_1, T_1, 3))
+    task2_projected = pca_3d.transform(trial_data2_h_epoch.reshape((-1, trial_data2_h_epoch.shape[-1]))).reshape((C_2, T_2, 3))
     
-    centroid_A = task_projections[0].mean(axis=0)
-    centroid_B = task_projections[1].mean(axis=0)
-    centroid_line = centroid_A.unsqueeze(0) + torch.linspace(0, 1, 100).unsqueeze(1) * (centroid_B - centroid_A).unsqueeze(0)
-    projected_line = pca_3d.transform(centroid_line)
-    distance = torch.linalg.norm(centroid_A - centroid_B).item()
-    
-    ax.plot(projected_line[:, 0], projected_line[:, 1], projected_line[:, 2], linewidth=2, alpha=0.5, color="black")
+    for c in range(options["batch_size"]):
 
-    # Set labels for axes
-    ax.text(projected_line[50, 0], projected_line[50, 1], projected_line[50, 2] + 0.5, f"Distance: {round(distance, 2)}", fontsize=10, color='black')
-    save_fig(os.path.join(exp_path, f"{system}_{epoch}_{task1}_{task2}_pcs.png"))
+        fig, ax = ax_3d_no_grid()
+        shadow_traj = np.concatenate([task1_projected[c, :], task2_projected[c, :]])
+        min_z = np.min(shadow_traj[:, 2])
+
+        ax.plot(task1_projected[c, :, 0], task1_projected[c, :, 1], task1_projected[c, :, 2], linewidth=4, alpha=0.75, color=colors[7], zorder=10)
+        ax.plot(task1_projected[c, :, 0], task1_projected[c, :, 1], min_z, linewidth=4, alpha=0.25, color="grey")
+        ax.scatter(task1_projected[c, 0, 0], task1_projected[c, 0, 1], task1_projected[c, 0, 2], s=150, marker="^", color=colors[7])
+        ax.scatter(task1_projected[c, -1, 0], task1_projected[c, -1, 1], task1_projected[c, -1, 2], s=150, marker="X", color=colors[7])
+
+        ax.plot(task2_projected[c, :, 0], task2_projected[c, :, 1], task2_projected[c, :, 2], linewidth=4, alpha=0.75, color="black", zorder=10)
+        ax.plot(task2_projected[c, :, 0], task2_projected[c, :, 1], min_z, linewidth=4, alpha=0.25, color="grey")
+        ax.scatter(task2_projected[c, 0, 0], task2_projected[c, 0, 1], task2_projected[c, 0, 2], s=150, marker="^", color="black")
+        ax.scatter(task2_projected[c, -1, 0], task2_projected[c, -1, 1], task2_projected[c, -1, 2], s=150, marker="X", color="black")
+
+        save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{system}_{task1}_{task2}_cond_{c}_pcs"), eps=True)
+
+        fig, ax = ax_3d_no_grid()
+        mtx1, mtx2, _ = scipy.spatial.procrustes(task1_projected[c, :], task2_projected[c, :])
+        shadow_traj = np.concatenate([mtx1, mtx2])
+        min_zp = np.min(shadow_traj[:, 2])
+
+        ax.plot(mtx1[:, 0], mtx1[:, 1], mtx1[:, 2], linewidth=4, alpha=0.75, color=colors[7], zorder=10)
+        ax.plot(mtx1[:, 0], mtx1[:, 1], min_zp, linewidth=4, alpha=0.25, color="grey")
+        ax.scatter(mtx1[0, 0], mtx1[0, 1], mtx1[0, 2], s=150, marker="^", color=colors[7])
+        ax.scatter(mtx1[-1, 0], mtx1[-1, 1], mtx1[-1, 2], s=150, marker="X", color=colors[7])
+
+        ax.plot(mtx2[:, 0], mtx2[:, 1], mtx2[:, 2], linewidth=4, alpha=0.75, color="black", zorder=10)
+        ax.plot(mtx2[:, 0], mtx2[:, 1], min_zp, linewidth=4, alpha=0.25, color="grey")
+        ax.scatter(mtx2[0, 0], mtx2[0, 1], mtx2[0, 2], s=150, marker="^", color="black")
+        ax.scatter(mtx2[-1, 0], mtx2[-1, 1], mtx2[-1, 2], s=150, marker="X", color="black")
+
+        save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{system}_{task1}_{task2}_cond_{c}_procrustes_pcs"), eps=True)
 
 
 
@@ -234,10 +268,15 @@ def delay_pcs_motor(model_name):
 def movement_pcs_motor(model_name):
     _epoch_pcs(model_name, "movement", "motor")
 
-def neural_epoch_pcs_halfcircleclk_figure8inv(model_name):
-    _two_task_epoch_pcs(model_name, "DlyHalfCircleClk", "DlyFigure8Inv", "stable", "neural")
-def neural_epoch_pcs_halfreach_fullreach(model_name):
-    _two_task_epoch_pcs(model_name, "DlyHalfReach", "DlyFullReach", "stable", "neural")
+def neural_two_task_pcs_sinusoid_fullcircleclk(model_name):
+    _two_task_pcs(model_name, "DlySinusoid", "DlyFullCircleClk", "all", "second", "h")
+def muscle_two_task_pcs_sinusoid_fullcircleclk(model_name):
+    _two_task_pcs(model_name, "DlySinusoid", "DlyFullCircleClk", "all", "second", "muscle_acts")
+
+def neural_two_task_pcs_halfcircleclk_halfcirclecclk(model_name):
+    _two_task_pcs(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk", "all", "all", "h")
+def muscle_two_task_pcs_halfcircleclk_halfcirclecclk(model_name):
+    _two_task_pcs(model_name, "DlyHalfCircleClk", "DlyHalfCircleCClk", "all", "all", "muscle_acts")
 
 
 
@@ -291,36 +330,19 @@ def _interpolated_fps(model_name, task1, task2,  epoch, task1_period="all", task
     trial_data2 = _test(model_path, model_file, options, env=env_dict[task2], add_new_rule_inputs=add_new_rule_inputs, num_new_inputs=num_new_inputs)
 
     if epoch == "delay":
+
         # Get inputs and x and h from desired timepoint
         inp1 = trial_data1["obs"][:, trial_data1["epoch_bounds"]["delay"][1]-1]
         inp2 = trial_data2["obs"][:, trial_data2["epoch_bounds"]["delay"][1]-1]
 
     elif epoch == "movement":
 
-        middle_movement1 = int((trial_data1["epoch_bounds"]["movement"][1] + trial_data1["epoch_bounds"]["movement"][0]) / 2)
-        middle_movement2 = int((trial_data2["epoch_bounds"]["movement"][1] + trial_data2["epoch_bounds"]["movement"][0]) / 2)
-
-        if task1_period == "first":
-            interpolation_point = int((middle_movement1 + trial_data1["epoch_bounds"]["movement"][0]) / 2)
-            inp1 = trial_data1["obs"][:, interpolation_point]
-        elif task1_period == "second":
-            interpolation_point = int((middle_movement1 + trial_data1["epoch_bounds"]["movement"][1]) / 2)
-            inp1 = trial_data1["obs"][:, interpolation_point]
-        elif task1_period == "all":
-            # This option only makes sense if using a half task
-            inp1 = trial_data1["obs"][:, middle_movement1]
-
-        if task2_period == "first":
-            interpolation_point = int((middle_movement2 + trial_data2["epoch_bounds"]["movement"][0]) / 2)
-            inp2 = trial_data2["obs"][:, interpolation_point]
-        elif task2_period == "second":
-            interpolation_point = int((middle_movement2 + trial_data2["epoch_bounds"]["movement"][1]) / 2)
-            inp2 = trial_data2["obs"][:, interpolation_point]
-        elif task2_period == "all":
-            inp2 = trial_data2["obs"][:, middle_movement2]
+        inp1 = get_interpolation_input(trial_data1, task1_period)
+        inp2 = get_interpolation_input(trial_data2, task2_period)
 
     '''Fixed point finder hyperparameters. See FixedPointFinder.py for detailed
     descriptions of available hyperparameters.'''
+
     fpf_hps = {
         'max_iters': 250,
         'lr_init': 1.,
@@ -384,7 +406,7 @@ def _interpolated_fps(model_name, task1, task2,  epoch, task1_period="all", task
             # Add fixed points and their info to dict
             fps_list.append(
                 {"fps": unique_fps, 
-                "interp_point": i, 
+                "interp_point": i 
                 }
             )
 
@@ -455,7 +477,7 @@ def run_all_compute_interpolated_fps(model_name):
 
 
 def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", task2_period="all", input_component=None,
-        add_new_rule_inputs=False, num_new_inputs=10, save_metrics=False):
+        add_new_rule_inputs=False, num_new_inputs=10, save_metrics=False, y_dist=1):
 
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -467,7 +489,6 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", 
     # Get variance of units across tasks and save to pickle file in model directory
     # Doing so across rules only
     options = {"batch_size": 16, "reach_conds": torch.arange(0, 32, 2), "delay_cond": 1, "speed_cond": 5}
-
     colors_alpha = plt.cm.magma(np.linspace(0, 1, 20)) 
 
     trial_data1 = _test(model_path, model_file, options, env=env_dict[task1], add_new_rule_inputs=add_new_rule_inputs, num_new_inputs=num_new_inputs)
@@ -480,9 +501,7 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", 
     two_task_pca = PCA(n_components=2)
     two_task_pca.fit(trial_data1_h_epoch.reshape((-1, trial_data1_h_epoch.shape[-1])))
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111, projection='3d')  # or projection='3d'
+    fig, ax = ax_3d_no_grid()
 
     # cond is a list containing the fps for each interpolated rule input for a given condition
     for c, cond in enumerate(fps):
@@ -504,45 +523,49 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", 
                 else:
                     ax.scatter(i/20, zstar[:, 0], zstar[:, 1], marker='.', alpha=0.75, color=colors_alpha[i], s=250)
 
-    ax.grid(False)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_zticks([])
     save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", f"{task1}_{task2}_{epoch}_{task1_period}_{task2_period}_{input_component}"), eps=True)
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(5, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
+    trajectory_point = trial_data1_h_epoch[:, halfway_task1]
+
+    fig, ax = standard_2d_ax()
+
     colors_conds = plt.cm.inferno(np.linspace(0, 1, 16)) 
     # Generate a plot of max eigenvalues
     max_eigs_conds = []
     for c, cond in enumerate(fps):
         interpolated_fps = [unique_fps["fps"] for unique_fps in cond]
         max_eigs = []
+        chosen_fps = []
         for i, fps_step in enumerate(interpolated_fps):
             n_inits = fps_step.n
             max_eig = 0
-            # Go through each unique fp and get the largest eig of all
-            for init_idx in range(n_inits):
-                # Stability of top eigenvalue
-                stability = np.abs(fps_step[init_idx].eigval_J_xstar[0, 0])
-                if stability > max_eig:
-                    max_eig = stability
+            dist = np.inf
+
+            if i == 0:
+                for init_idx in range(n_inits):
+                    cur_dist = np.linalg.norm(trajectory_point[c] - fps_step[init_idx].xstar)
+                    if cur_dist < dist:
+                        dist = cur_dist
+                        chosen_fp = fps_step[init_idx]
+            else:
+                for init_idx in range(n_inits):
+                    cur_dist = np.linalg.norm(chosen_fps[i-1].xstar - fps_step[init_idx].xstar)
+                    if cur_dist < dist:
+                        dist = cur_dist
+                        chosen_fp = fps_step[init_idx]
+            chosen_fps.append(chosen_fp)
+
+            max_eig = chosen_fp.eigval_J_xstar[0, 0].real
             max_eigs.append(max_eig)
+
         x = np.arange(1, 21)
         eig_mean = np.mean(max_eigs)
         ax.scatter(x, max_eigs, marker="o", color=colors_conds[c], s=200, alpha=0.75)
         ax.set_ylim([0.5, 1.2])
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
         max_eigs_conds.append([np.abs(max_eigs[i+1] - max_eigs[i]) for i in range(len(max_eigs)-1)])
     save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", f"{task1}_{task2}_{epoch}_{task1_period}_{task2_period}_{input_component}_max_eigs"), eps=True)
 
-    # Generate a plot of max eigenvalues
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(5, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    trajectory_point = trial_data1_h_epoch[:, halfway_task1]
+    fig, ax = standard_2d_ax()
 
     # Generate a plot of fp distances
     euc_dists_conds = []
@@ -551,17 +574,17 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", 
         chosen_fps = []
         for i, fps_step in enumerate(interpolated_fps):
             n_inits = fps_step.n
-            dist = 0
+            dist = np.inf
             if i == 0:
                 for init_idx in range(n_inits):
                     cur_dist = np.linalg.norm(trajectory_point[c] - fps_step[init_idx].xstar)
-                    if cur_dist > dist:
+                    if cur_dist < dist:
                         dist = cur_dist
                         chosen_fp = fps_step[init_idx].xstar
             else:
                 for init_idx in range(n_inits):
                     cur_dist = np.linalg.norm(chosen_fps[i-1] - fps_step[init_idx].xstar)
-                    if cur_dist > dist:
+                    if cur_dist < dist:
                         dist = cur_dist
                         chosen_fp = fps_step[init_idx].xstar
             chosen_fps.append(chosen_fp)
@@ -569,35 +592,17 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", 
         dist_list = [np.linalg.norm(chosen_fps[i+1] - chosen_fps[i]) for i in range(len(chosen_fps)-1)]
         x = np.arange(1, 20)
         ax.scatter(x, dist_list, marker="o", color=colors_conds[c], s=200, alpha=0.75)
-        ax.set_ylim([0, 1])
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+        ax.set_ylim([0, y_dist])
         euc_dists_conds.append([np.abs(dist_list[i+1] - dist_list[i]) for i in range(len(dist_list)-1)])
     save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", f"{task1}_{task2}_{epoch}_{task1_period}_{task2_period}_{input_component}_dists"), eps=True)
         
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(5, 4))
-    ax = fig.add_subplot(111, projection='3d')  # or projection='3d'
+    fig, ax = empty_3d()
 
     colors_traj = plt.cm.inferno(np.linspace(0, 1, 10)) 
 
-    middle_movement1 = int((trial_data1["epoch_bounds"]["movement"][1] + trial_data1["epoch_bounds"]["movement"][0]) / 2)
-    middle_movement2 = int((trial_data2["epoch_bounds"]["movement"][1] + trial_data2["epoch_bounds"]["movement"][0]) / 2)
-
-    if task1_period == "first":
-        trial_data1_h_epoch = trial_data1["h"][:, trial_data1["epoch_bounds"]["movement"][0]:middle_movement1]
-    elif task1_period == "second":
-        trial_data1_h_epoch = trial_data1["h"][:, middle_movement1:trial_data1["epoch_bounds"]["movement"][1]]
-    elif task1_period == "all":
-        trial_data1_h_epoch = trial_data1["h"][:, trial_data1["epoch_bounds"]["movement"][0]:trial_data1["epoch_bounds"]["movement"][1]]
-
-    if task2_period == "first":
-        trial_data2_h_epoch = trial_data2["h"][:, trial_data2["epoch_bounds"]["movement"][0]:middle_movement2]
-    elif task2_period == "second":
-        trial_data2_h_epoch = trial_data2["h"][:, middle_movement2:trial_data2["epoch_bounds"]["movement"][1]]
-    elif task2_period == "all":
-        trial_data2_h_epoch = trial_data2["h"][:, trial_data2["epoch_bounds"]["movement"][0]:trial_data2["epoch_bounds"]["movement"][1]]
+    trial_data1_h_epoch = split_movement_epoch(trial_data1, task1_period, "h")
+    trial_data2_h_epoch = split_movement_epoch(trial_data2, task2_period, "h")
 
     # Get trajectories during task period
     combined_tasks = torch.cat([trial_data1_h_epoch, trial_data2_h_epoch], dim=1)
@@ -620,8 +625,6 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", 
         3
     ))
 
-    min_value = torch.min(combined_tasks)
-
     for c, condition in enumerate(trial_data_1_projected):
         ax.plot(condition[:, 0], condition[:, 1], condition[:, 2], linewidth=4, color=colors_traj[7], alpha=0.75, zorder=10)
         ax.scatter(condition[0, 0], condition[0, 1], condition[0, 2], s=150, marker="^", color=colors_traj[7])
@@ -631,8 +634,6 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", 
         ax.scatter(condition[0, 0], condition[0, 1], condition[0, 2], s=150, marker="^", color="black", zorder=20)
         ax.scatter(condition[-1, 0], condition[-1, 1], condition[-1, 2], s=150, marker="X", color="black", zorder=20)
 
-    # Remove everything but the plot line
-    ax.set_axis_off()  # hides axes, ticks, labels, etc.
     save_fig(os.path.join(exp_path, f"{task1}_{task2}", f"{epoch}", f"{input_component}", f"{task1}_{task2}_{epoch}_{task1_period}_{task2_period}_{input_component}_pca"), eps=True)
 
     if save_metrics:
@@ -644,7 +645,6 @@ def _plot_interpolated_fps(model_name, task1, task2, epoch, task1_period="all", 
 
 
 #---------------------------------------------------------------- Subset Pair
-# Movement period with different input interpolations
 def plot_interpolated_fps_halfreach_fullreach_movement(model_name, save_metrics=False):
     if save_metrics:
         max_eigs, euc_dist = _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", 
@@ -654,7 +654,6 @@ def plot_interpolated_fps_halfreach_fullreach_movement(model_name, save_metrics=
         _plot_interpolated_fps(model_name, "DlyHalfReach", "DlyFullReach", "movement", 
             task1_period="all", task2_period="first", save_metrics=save_metrics)
 #---------------------------------------------------------------- Extension Pair
-# Movement period with different input interpolations
 def plot_interpolated_fps_halfcircleclk_sinusoidinv_movement(model_name, save_metrics=False):
     if save_metrics:
         max_eigs, euc_dist = _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlySinusoidInv", "movement", 
@@ -664,7 +663,6 @@ def plot_interpolated_fps_halfcircleclk_sinusoidinv_movement(model_name, save_me
         _plot_interpolated_fps(model_name, "DlyHalfCircleClk", "DlySinusoidInv", "movement", 
             task1_period="all", task2_period="all", save_metrics=save_metrics)
 #---------------------------------------------------------------- Retraction Pair
-# Movement period with different input interpolations
 def plot_interpolated_fps_fullcircleclk_figure8_movement(model_name, save_metrics=False):
     if save_metrics:
         max_eigs, euc_dist = _plot_interpolated_fps(model_name, "DlyFullCircleClk", "DlyFigure8", "movement", 
@@ -674,7 +672,6 @@ def plot_interpolated_fps_fullcircleclk_figure8_movement(model_name, save_metric
         _plot_interpolated_fps(model_name, "DlyFullCircleClk", "DlyFigure8", "movement", 
             task1_period="second", task2_period="second", save_metrics=save_metrics)
 #---------------------------------------------------------------- Extension-Retraction Pair
-# Movement period with different input interpolations
 def plot_interpolated_fps_sinusoid_fullreach_movement(model_name, save_metrics=False):
     if save_metrics:
         max_eigs, euc_dist = _plot_interpolated_fps(model_name, "DlySinusoid", "DlyFullReach", "movement", 
@@ -687,145 +684,37 @@ def plot_interpolated_fps_sinusoid_fullreach_movement(model_name, save_metrics=F
 
 
 def run_all_plot_interpolated_fps(model_name):
-
-    # Variables needed for saving data
-    exp_path = f"results/{model_name}/compositionality/interpolated_fps"
-    eig_dict = {}
-    euc_dict = {}
-    colors = ["purple", "blue", "pink", "orange"]
-    combination_labels = np.arange(0, 4)
-
-    # Reject outliers since there are many in the euclidean distance
-    def reject_outliers(data, m=2):
-        d = np.abs(data - np.median(data))
-        mdev = np.median(d)
-        s = d/mdev if mdev else np.zeros(len(d))
-        return data[s<m]
-    
-    # helper to add data to dict
-    def add_to_dicts(eigs, eucs, key):
-        eig_dict[key] = reject_outliers(np.array(eigs).flatten())
-        euc_dict[key] = reject_outliers(np.array(eucs).flatten())
-
-    # helper to add data to dict
-    def convert_dict_to_list(data):
-        data_list = list(data.values())
-        label_list = list(data.keys())
-        return data_list, label_list
-    
-    def dynamics_violin_plot(data):
-        # Create a (4,4) 2d ax object for plotting
-        ax = standard_2d_ax()
-        parts = ax.violinplot(data, showmeans=True)
-        # Customize violin
-        for i, pc in enumerate(parts['bodies']):
-            pc.set_facecolor(colors[i])
-            pc.set_edgecolor('black')
-            pc.set_alpha(0.7)
-            pc.set_linewidth(1.2)
-        parts['cbars'].set_edgecolor('black')
-        parts['cmins'].set_edgecolor('black')
-        parts['cmaxes'].set_edgecolor('black')
-        parts['cmeans'].set_color('black')
-        plt.xticks([])
-
     # Add data from each task
-    max_eigs, euc_dist = plot_interpolated_fps_halfreach_fullreach_movement(model_name, save_metrics=True)
-    add_to_dicts(max_eigs, euc_dist, "subset")
-    max_eigs, euc_dist = plot_interpolated_fps_halfcircleclk_sinusoidinv_movement(model_name, save_metrics=True)
-    add_to_dicts(max_eigs, euc_dist, "extension")
-    max_eigs, euc_dist = plot_interpolated_fps_fullcircleclk_figure8_movement(model_name, save_metrics=True)
-    add_to_dicts(max_eigs, euc_dist, "retraction")
-    max_eigs, euc_dist = plot_interpolated_fps_sinusoid_fullreach_movement(model_name, save_metrics=True)
-    add_to_dicts(max_eigs, euc_dist, "extension_retraction")
-
-    # Convert data to list format for plotting
-    eig_list, eig_label_list = convert_dict_to_list(eig_dict)
-    euc_list, euc_label_list = convert_dict_to_list(euc_dict)
-
-    # violin plot for max eigenvalues
-    dynamics_violin_plot(eig_list)
-    save_fig(os.path.join(exp_path, "global_quantification", f"all_example_max_eigs"), eps=True)
-    pvalues(eig_label_list, eig_dict, "eig_diff")
-
-    # violin plot for fp euclidean distance
-    dynamics_violin_plot(euc_list)
-    save_fig(os.path.join(exp_path, "global_quantification", f"all_example_euc_dists"), eps=True)
-    pvalues(euc_label_list, euc_dict, "euc_dist")
+    plot_interpolated_fps_halfreach_fullreach_movement(model_name, save_metrics=False)
+    plot_interpolated_fps_halfcircleclk_sinusoidinv_movement(model_name, save_metrics=False)
+    plot_interpolated_fps_fullcircleclk_figure8_movement(model_name, save_metrics=False)
+    plot_interpolated_fps_sinusoid_fullreach_movement(model_name, save_metrics=False)
 
 
-
-
-def _gather_distances(combinations, batch_size):
-
-    dist = {}
-    for combination in combinations:
-        trial_data1 = combinations[combination][0]
-        trial_data2 = combinations[combination][1]
-        condition_list = []
-        for c in range(batch_size):
-            averaged_h1 = trial_data1[c]
-            averaged_h2 = trial_data2[c]
-            condition_dist = torch.linalg.norm(averaged_h1 - averaged_h2)
-            condition_list.append(condition_dist.item())
-        dist[combination] = condition_list
-
-    return dist
-
-def _gather_angles(combinations, batch_size):
-
-    angles = {}
-    for combination in combinations:
-        trial_data1 = combinations[combination][0]
-        trial_data2 = combinations[combination][1]
-        condition_list = []
-        for c in range(batch_size):
-            averaged_h1 = trial_data1[c]
-            averaged_h2 = trial_data2[c]
-            condition_angle = torch.arccos(torch.diagonal(averaged_h1 @ averaged_h2.T) / (torch.linalg.norm(averaged_h1, dim=1) * torch.linalg.norm(averaged_h2, dim=1))).mean()
-            condition_list.append(condition_angle.item())
-        angles[combination] = condition_list
-
-    return angles
-
-def _gather_shapes(combinations, batch_size):
-
-    traj_dists = {}
-    for combination in combinations:
-        trial_data1 = combinations[combination][0]
-        trial_data2 = combinations[combination][1]
-        condition_list = []
-        for c in range(batch_size):
-            # First thing to do is interpolate, then align
-            _, _, disparity = scipy.spatial.procrustes(trial_data1[c], trial_data2[c])
-            condition_list.append(disparity)
-        traj_dists[combination] = condition_list
-
-    return traj_dists
-
-def _convert_motif_dict_to_list(target_dict, data):
-    target_data = []
-    for combination in target_dict:
-        if combination in data:
-            target_data.extend(data[combination])
-        elif (combination[1], combination[0]) in data:
-            target_data.extend(data[(combination[1], combination[0])])
-    return target_data
 
 
 def _plot_bar(combinations, metric, exp_path, metric_name, combination_labels, combination_colors):
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    fig, ax = standard_2d_ax()
 
     combination_means = []
     combination_stds = []
     combination_data = {}
     for l, combination in enumerate(combinations):
         task_metric = _convert_motif_dict_to_list(combination, metric)
+
+        """
+            This is for finding examples for two_task_pcs. Find task pairs with large disparities, etc.
+            Delete this once done for sure, change as needed to find different examples
+        """
+
+        if combination_labels[l] == "extension_tasks" and metric_name == "muscle_shapes":
+            min_val = np.argmax(task_metric)
+            condition_val = min_val % 32
+            min_val /= 32
+            min_val = math.floor(min_val)
+            print(f"ext pair with highest muscle shape is: {combination[min_val]}, {condition_val}")
+
         combination_data[combination_labels[l]] = task_metric
         combination_means.append(sum(task_metric) / len(task_metric))
         combination_stds.append(np.std(task_metric, ddof=1))
@@ -848,8 +737,6 @@ def _plot_bar(combinations, metric, exp_path, metric_name, combination_labels, c
     parts['cmaxes'].set_edgecolor('black')
     parts['cmeans'].set_color('black')
 
-    #plt.bar(combination_labels, combination_means, yerr=combination_stds, capsize=10, color=combination_colors, edgecolor='black')
-
     if "angles" in metric_name:
         plt.yticks([0, 1.5])
     elif "shapes" in metric_name:
@@ -857,29 +744,13 @@ def _plot_bar(combinations, metric, exp_path, metric_name, combination_labels, c
     plt.xticks([])
     save_fig(os.path.join(exp_path, "movement", metric_name), eps=True)
 
-    combination_labels = list(itertools.combinations(combination_data, 2))
-    # Print out significance here
-    for combination in combination_labels:
-        result = scipy.stats.mannwhitneyu(combination_data[combination[0]], combination_data[combination[1]])
-        pvalue = result[1]
-        if pvalue < 0.001:
-            pvalue_str = f"***, {pvalue}"
-        elif pvalue < 0.01:
-            pvalue_str = f"**, {pvalue}"
-        elif pvalue < 0.05:
-            pvalue_str = f"*, {pvalue}"
-        else:
-            pvalue_str = "Not Significant"
-        print(f"pvalue for {combination[0]} and {combination[1]} in metric {metric_name} is: {pvalue_str}")
+    combination_list = list(combination_data.keys())
+    pvalues(combination_list, combination_data, metric_name)
 
     
 def _plot_scatter(all_combinations, combinations, combination_colors, metric1, metric2, exp_path, metric1_name, metric2_name):
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    fig, ax = standard_2d_ax()
 
     task_metric1 = _convert_motif_dict_to_list(all_combinations, metric1)
     task_metric2 = _convert_motif_dict_to_list(all_combinations, metric2)
@@ -944,34 +815,34 @@ def _trajectory_alignment(model_name):
         )
     
     print("Computing Distances...")
-    distances_h = _gather_distances(combinations_h, options["batch_size"])
-    distances_muscle = _gather_distances(combinations_muscle, options["batch_size"])
+    distances_h = distances_from_combinations(combinations_h, options["batch_size"])
+    distances_muscle = distances_from_combinations(combinations_muscle, options["batch_size"])
 
     print("Computing Angles...")
-    angles_h = _gather_angles(combinations_h, options["batch_size"])
-    angles_muscle = _gather_angles(combinations_muscle, options["batch_size"])
+    angles_h = angles_from_combinations(combinations_h, options["batch_size"])
+    angles_muscle = shapes_from_combinations(combinations_muscle, options["batch_size"])
 
     print("Computing Shapes...")
-    shapes_h = _gather_shapes(combinations_h, options["batch_size"])
-    shapes_muscle = _gather_shapes(combinations_muscle, options["batch_size"])
+    shapes_h = shapes_from_combinations(combinations_h, options["batch_size"])
+    shapes_muscle = shapes_from_combinations(combinations_muscle, options["batch_size"])
 
     all_subsets = [
-        extension_tasks, 
-        retraction_tasks,
         subset_tasks,
+        retraction_tasks,
+        extension_tasks, 
         extension_retraction_tasks,
         combination_labels
     ]
 
     all_subset_labels = [
-        "extension_tasks",
-        "retraction_tasks",
         "subset_tasks",
+        "retraction_tasks",
+        "extension_tasks",
         "extension_retraction_tasks",
         "all_tasks"
     ]
 
-    all_subset_colors = ["blue", "pink", "purple", "orange", "grey"]
+    all_subset_colors = ["purple", "pink", "blue", "orange", "grey"]
 
     all_metrics = {
         "neural_distances": distances_h,
@@ -988,12 +859,7 @@ def _trajectory_alignment(model_name):
 
     # -------------------------------------- NEURAL AND MUSCLE SHAPE DISTRIBUTIONS
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
+    fig, ax = standard_2d_ax()
     all_shapes_h = _convert_motif_dict_to_list(combination_labels, shapes_h)
     all_shapes_muscle = _convert_motif_dict_to_list(combination_labels, shapes_muscle)
 
@@ -1009,12 +875,7 @@ def _trajectory_alignment(model_name):
 
     # ------------------------------------------------------------- ANGLE DISTRIBUTIONS
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
+    fig, ax = standard_2d_ax()
     angle_h_dist = _convert_motif_dict_to_list(combination_labels, angles_h)
     angle_muscle_dist = _convert_motif_dict_to_list(combination_labels, angles_muscle)
 
@@ -1041,8 +902,6 @@ def _trajectory_alignment(model_name):
 
 def trajectory_alignment_movement(model_name):
     _trajectory_alignment(model_name)
-
-
 
 
 
@@ -1147,10 +1006,7 @@ def task_vaf_ratio(model_name):
         subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = _get_vaf_combination(all_subsets[subset], combinations_h, "h", comp_range)
     all_task_pc_means, all_task_pc_stds = _get_vaf_combination(combination_labels, combinations_h, "h", comp_range)
     
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-
+    fig, ax = standard_2d_ax()
     x = np.arange(1, comp_range)
     for subset in subset_pc_dict_means:
         ax.plot(x, subset_pc_dict_means[subset], linewidth=4, marker='o', markersize=15, alpha=0.75, color=all_subsets_colors[subset])
@@ -1171,24 +1027,17 @@ def task_vaf_ratio(model_name):
     )
 
     comp_range = 7
-
     ax.set_ylim([0, 1.1])
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
     save_fig(os.path.join(exp_path, "vaf_ratio_neural"), eps=True)
 
     # Plotting vaf for different number of pc components muscle
-
     subset_pc_dict_means = {}
     subset_pc_dict_stds = {}
     for subset in all_subsets:
         subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = _get_vaf_combination(all_subsets[subset], combinations_muscle, "muscle_acts", comp_range)
     all_task_pc_means, all_task_pc_stds = _get_vaf_combination(combination_labels, combinations_muscle, "muscle_acts", comp_range)
     
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-
+    fig, ax = standard_2d_ax()
     x = np.arange(1, comp_range)
     for subset in subset_pc_dict_means:
         ax.plot(x, subset_pc_dict_means[subset], linewidth=4, marker='o', markersize=15, alpha=0.75, color=all_subsets_colors[subset])
@@ -1209,8 +1058,6 @@ def task_vaf_ratio(model_name):
     )
 
     ax.set_ylim([0, 1.1])
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
     save_fig(os.path.join(exp_path, "vaf_ratio_muscle"), eps=True)
 
 
@@ -1278,11 +1125,7 @@ def dsa_scatter(model_name):
     model_path = f"checkpoints/{model_name}"
     exp_path = f"results/{model_name}/compositionality/dsa"
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    fig, ax = standard_2d_ax()
 
     dsa_data = load_pickle(os.path.join(model_path, "dsa_similarity.txt"))
     similarities = dsa_data["similarities"]
@@ -1322,6 +1165,8 @@ def dsa_heatmap(model_name):
     ax.set_xticks([])
     ax.set_yticks([])
     save_fig(os.path.join(exp_path, f"neural_dsa_similarity_vis"), eps=True)
+
+
 
 
 def procrustes_similarity_matrix(model_name):
@@ -1391,11 +1236,7 @@ def procrustes_scatter(model_name):
     model_path = f"checkpoints/{model_name}"
     exp_path = f"results/{model_name}/compositionality/dsa"
 
-    # Create figure and 3D axes
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111)  # or projection='3d'
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    fig, ax = standard_2d_ax()
 
     procrustes_data = load_pickle(os.path.join(model_path, "procrustes_similarity.txt"))
     similarities = procrustes_data["similarities"]
@@ -1502,12 +1343,6 @@ def task_similarity_classification(model_name):
     save_fig(os.path.join(exp_path, f"procrustes_silhouette_bar"), eps=True)
 
 
-def _fit_svm(X, y):
-    svm = sklearn.svm.SVC(kernel="linear")
-    svm.fit(X, y)
-    return svm.score(X, y)
-
-
 
 
 
@@ -1547,6 +1382,17 @@ if __name__ == "__main__":
         delay_pcs_motor(args.model_name)
     elif args.experiment == "movement_pcs_motor":
         movement_pcs_motor(args.model_name)
+    
+
+    elif args.experiment == "neural_two_task_pcs_sinusoid_fullcircleclk":
+        neural_two_task_pcs_sinusoid_fullcircleclk(args.model_name)
+    elif args.experiment == "muscle_two_task_pcs_sinusoid_fullcircleclk":
+        muscle_two_task_pcs_sinusoid_fullcircleclk(args.model_name)
+    elif args.experiment == "neural_two_task_pcs_halfcircleclk_halfcirclecclk":
+        neural_two_task_pcs_halfcircleclk_halfcirclecclk(args.model_name)
+    elif args.experiment == "muscle_two_task_pcs_halfcircleclk_halfcirclecclk":
+        muscle_two_task_pcs_halfcircleclk_halfcirclecclk(args.model_name)
+
 
     elif args.experiment == "task_vaf_ratio":
         task_vaf_ratio(args.model_name)

@@ -119,10 +119,10 @@ def run_all_compute_interpolated_fps(model_name):
 
 def plot_interpolated_fps_cclkhalfcircle_cclkfullcircle1_movement(model_name):
     _plot_interpolated_fps(model_name, "DlyHalfCircleCClk", "DlyFullCircleCClk", "movement", 
-        task1_period="all", task2_period="first", input_component=None, add_new_rule_inputs=True, num_new_inputs=10)
+        task1_period="all", task2_period="first", input_component=None, add_new_rule_inputs=True, num_new_inputs=10, y_dist=10)
 def plot_interpolated_fps_cclkhalfcircle_cclkfullcircle2_movement(model_name):
     _plot_interpolated_fps(model_name, "DlyHalfCircleCClk", "DlyFullCircleCClk", "movement", 
-        task1_period="all", task2_period="second", input_component=None, add_new_rule_inputs=True, num_new_inputs=10)
+        task1_period="all", task2_period="second", input_component=None, add_new_rule_inputs=True, num_new_inputs=10, y_dist=10)
 
 def run_all_plot_interpolated_fps(model_name):
     plot_interpolated_fps_cclkhalfcircle_cclkfullcircle1_movement(model_name)
