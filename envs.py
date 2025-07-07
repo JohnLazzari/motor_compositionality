@@ -6,8 +6,7 @@ from itertools import product
 import random
 
 # Comments in first environment (below) should follow for others
-
-class DlyHalfReach(env.Environment):
+class MotornetEnv(env.Environment):
     """A reach to a random target from a random starting position.
 
     Args:
@@ -122,6 +121,17 @@ class DlyHalfReach(env.Environment):
         change the returned data. Here the goals (`i.e.`, the targets) are drawn from a random uniform distribution across
         the full joint space.
         """
+        raise NotImplementedError
+
+
+
+
+
+class DlyHalfReach(MotornetEnv):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
         #------------------------------------- START OPTION AND EFFECTOR DEFINITIONS 
 
@@ -265,71 +275,9 @@ class DlyHalfReach(env.Environment):
 
 
 
-class DlyHalfCircleClk(env.Environment):
+class DlyHalfCircleClk(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
@@ -483,72 +431,9 @@ class DlyHalfCircleClk(env.Environment):
 
 
 
-class DlyHalfCircleCClk(env.Environment):
+class DlyHalfCircleCClk(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-        
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
@@ -701,72 +586,9 @@ class DlyHalfCircleCClk(env.Environment):
 
 
 
-class DlySinusoid(env.Environment):
+class DlySinusoid(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
@@ -922,72 +744,9 @@ class DlySinusoid(env.Environment):
 
 
 
-class DlySinusoidInv(env.Environment):
+class DlySinusoidInv(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-        
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
@@ -1140,72 +899,9 @@ class DlySinusoidInv(env.Environment):
 
 
 
-class DlyFullReach(env.Environment):
+class DlyFullReach(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
@@ -1359,72 +1055,9 @@ class DlyFullReach(env.Environment):
 
 
 
-class DlyFullCircleClk(env.Environment):
+class DlyFullCircleClk(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
@@ -1578,72 +1211,9 @@ class DlyFullCircleClk(env.Environment):
 
 
 
-class DlyFullCircleCClk(env.Environment):
+class DlyFullCircleCClk(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-        
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
@@ -1797,72 +1367,9 @@ class DlyFullCircleCClk(env.Environment):
 
 
 
-class DlyFigure8(env.Environment):
+class DlyFigure8(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
@@ -2023,71 +1530,9 @@ class DlyFigure8(env.Environment):
 
 
 
-class DlyFigure8Inv(env.Environment):
+class DlyFigure8Inv(MotornetEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[:self.skeleton.space_dim] = [0.] * self.skeleton.space_dim  # target info is noiseless
-        self.hidden_goal = None
-        # timestep info
-        self.dt = 0.01
-        self.go_cue = None
-        self.initial_pos = None
-
-    def get_obs(self, t, action=None, deterministic: bool = False) -> th.Tensor | np.ndarray:
-        self.update_obs_buffer(action=action)
-
-        obs_as_list = [
-        self.rule_input,
-        self.speed_scalar[:, t],
-        self.go_cue[:, t],
-        self.vis_inp[:, t],
-        self.obs_buffer["vision"][0],
-        self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][:self.action_frame_stacking]
-        
-        obs = th.cat(obs_as_list, dim=-1)
-
-        if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
-
-        return obs if self.differentiable else self.detach(obs)
-
-    def step(
-        self,
-        t,
-        action: th.Tensor | np.ndarray,
-        **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
-        
-        action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32).to(self.device)
-        noisy_action = action
-        
-        self.effector.step(noisy_action, **kwargs)
-
-        obs = self.get_obs(t, action=noisy_action)
-        reward = None if self.differentiable else np.zeros((self.detach(action.shape[0]), 1))
-        terminated = bool(t >= self.max_ep_duration)
-        t_delay_shifted = t - self.epoch_bounds["movement"][0]
-
-        """
-            Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
-        """
-        if t < self.epoch_bounds["delay"][1]:
-            self.hidden_goal = self.traj[:, 0, :]
-        elif t >= self.epoch_bounds["movement"][0] and t < self.epoch_bounds["movement"][1]:
-            self.hidden_goal = self.traj[:, t_delay_shifted, :].clone()
-        elif t >= self.epoch_bounds["hold"][0]:
-            self.hidden_goal = self.traj[:, -1, :].clone()
-
-        info = {
-            "states": self._maybe_detach_states(),
-            "action": action,
-            "noisy action": noisy_action,
-            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
-        }
-
-        return obs, reward, terminated, info
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
 
