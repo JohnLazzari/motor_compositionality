@@ -8,6 +8,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from train import train_2link, load_prev_training, train_compositional_env_base_model, train_subsets_base_model, train_subsets_held_out_base_model
+from train import train_cog
+from env_inp_out import plot_task_input_output_cog
 import config
 import tqdm as tqdm
 
@@ -205,6 +207,15 @@ def continue_training(model_name):
     model_file = f"{model_name}.pth"
     load_prev_training(model_path, model_file)
 
+def train_go_task():
+    hp = {"hid_size": 256, "inp_size": 99}
+    model_path = "checkpoints/go_rnn_relu"
+    model_file = "go_rnn_relu.pth"
+    print("TRAINING GO TASK WITH RNN")
+    train_cog(model_path, model_file, hp)
+
+def plot_cog(model_name):
+    plot_task_input_output_cog(model_name)
 
 
 if __name__ == "__main__":
@@ -243,14 +254,17 @@ if __name__ == "__main__":
         train_gru128()
     elif args.experiment == "continue_training":
         continue_training(args.model_name)
-    
-
     elif args.experiment == "run_train_compositional_env_base_model":
         run_train_compositional_env_base_model()
     elif args.experiment == "run_train_subsets_base_model":
         run_train_subsets_base_model()
     elif args.experiment == "run_train_subsets_held_out_base_model":
         run_train_subsets_held_out_base_model()
+    elif args.experiment == "train_go_task":
+        train_go_task()
+    elif args.experiment == "plot_input_output_cog":
+        plot_cog(args.model_name)
+
 
     else:
         raise ValueError("Experiment not in this file")

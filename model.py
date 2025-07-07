@@ -94,6 +94,7 @@ class RNNPolicy(nn.Module):
         self.to(device)
 
     def forward(self, obs, x, h, *args, noise=True):
+        
         # Forward pass through mRNN
         x, h = self.mrnn(obs[:, None, :], x, h, *args, noise=noise)
         # Squeeze in the time dimension (doing timesteps one by one)
@@ -270,8 +271,10 @@ class OrthogonalNet(nn.Module):
             c += cc
 
         return result
-
+    
     def forward(self, obs, x, h, *args, noise=True):
+        print("\n>>> Inside model.py forward()")
+        print(">>> obs shape at input:", obs.shape)
         # Forward pass through mRNN
         x, h = self.mrnn(obs[:, None, :], x, h, *args, noise=noise)
         # Squeeze in the time dimension (doing timesteps one by one)

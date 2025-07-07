@@ -17,6 +17,7 @@ import os
 from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
+from cog_envs import Go
 import matplotlib.pyplot as plt
 import numpy as np
 import config
@@ -50,7 +51,9 @@ env_dict = {
     "DlyFigure8Inv": DlyFigure8Inv
 }
 
-
+cog_env_dict = { 
+    "Go": Go
+}
 
 def _test(
     model_path, 

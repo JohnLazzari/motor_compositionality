@@ -201,7 +201,8 @@ class Go(CogMotorEnv):
         angles = th.linspace(0, 2 * np.pi, 33)[:-1]
 
         # this wont work yet cause everything else has shape batch_size (or I can assert reach_conds and batch_size are same shape)
-        stim_idx = th.randint(0, 2)
+        #stim_idx = th.randint(0, 2)
+        stim_idx = 0
         point_idx = th.randint(0, angles.size(0), (batch_size,))
 
         # Compute (x, y) coordinates for each angle
@@ -214,6 +215,9 @@ class Go(CogMotorEnv):
             stim_2 = 0.8 * np.exp(-0.5 * ((8 * np.abs(angles.unsqueeze(1) - angles[point_idx].unsqueeze(0))) / np.pi)**2)
             stim_1 = th.zeros_like(stim_2)
 
+        stim_1 = th.tensor(stim_1, dtype=th.float32).T  
+        stim_2 = th.tensor(stim_2, dtype=th.float32).T  
+
         goal = points[point_idx] * 0.25 + fingertip
 
         # Draw a line from fingertip to goal 
@@ -223,23 +227,24 @@ class Go(CogMotorEnv):
         self.traj = th.stack([x_points, y_points], dim=-1)
 
         # We want to start target onset after stable epoch
-        self.stim_1 = th.cat([
+        #self.stim_1 = th.cat([
             # [batch_size, stability timesteps, xy]
-            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], stim_1.shape[-1])),
+            #th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], stim_1.shape[-1])),
             # [batch_size, delay->hold timesteps, xy]
-            stim_1.repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+            #stim_1.repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+        #], dim=1)
+
+        self.stim_1 = th.cat([
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], stim_1.shape[-1])),
+            stim_1.unsqueeze(1).repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
         ], dim=1)
 
-        # We want to start target onset after stable epoch
         self.stim_2 = th.cat([
-            # [batch_size, stability timesteps, xy]
-            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], stim_1.shape[-1])),
-            # [batch_size, delay->hold timesteps, xy]
-            stim_2.repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
+            th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], stim_2.shape[-1])),
+            stim_2.unsqueeze(1).repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
         ], dim=1)
 
         self.hidden_goal = self.traj[:, 0, :].clone()
-
         #------------------------------------- END
 
 
@@ -263,5 +268,197 @@ class Go(CogMotorEnv):
         }
 
         #------------------------------------- END
+
+        return obs, info
+
+class DelayGo(CogMotorEnv):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+        self._set_generator(seed=seed)
+        options = {} if options is None else options
+
+        batch_size: int = options.get('batch_size', 1)
+        
+        deterministic: bool = options.get('deterministic', False)
+
+        joint_state = th.tensor([
+            self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1,
+            self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
+        ]).unsqueeze(0).repeat(batch_size, 1)
+
+        self.effector.reset(options={"batch_size": batch_size, "joint_state": joint_state})
+       
+        #------------------------------------- START EPOCH DURATION AND BOUNDS DEFINITIONS
+
+        # Epoch times
+        fix_time = 50
+        stim_time = 50
+        delay_time = random.choice([50, 75, 100])
+        go_time = 50
+
+        self.epoch_bounds = {
+            "fixed_point": (0, fix_time),
+            "stimulus": (fix_time, fix_time + stim_time),
+            "delay": (fix_time + stim_time, fix_time + stim_time + delay_time),
+            "go": (fix_time + stim_time + delay_time, fix_time + stim_time + delay_time + go_time),
+        }
+
+        self.max_ep_duration = self.epoch_bounds["go"][1] - 1
+        
+        
+        #------------------------------------- START STATIC NETWORK INPUT (NOT FEEDBACK)
+
+        self.go_cue = th.cat([
+            th.zeros(batch_size, self.epoch_bounds["delay"][1], 1),
+            th.ones(batch_size, self.epoch_bounds["go"][1] - self.epoch_bounds["delay"][1], 1)
+        ], dim=1)
+
+        # Rule input 
+        self.rule_input = th.zeros(batch_size, 20)
+        self.rule_input[:, 1] = 1
+
+        #------------------------------------- END
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
+        
+        fingertip = self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
+
+        angles = th.linspace(0, 2 * np.pi, 33)[:-1]
+
+        point_idx = th.randint(0, angles.size(0), (batch_size,))
+        stim_idx = th.randint(0, 2, (batch_size,))
+
+        points = th.stack([th.tensor([np.cos(angle), np.sin(angle)]) for angle in angles], dim=0)
+        goal = points[point_idx] * 0.25 + fingertip
+
+        # Trajectory toward goal
+        x_points = fingertip[:, None, 0] + th.linspace(0, 1, steps=go_time).repeat(batch_size, 1) * (goal[:, None, 0] - fingertip[:, None, 0])
+        y_points = fingertip[:, None, 1] + th.linspace(0, 1, steps=go_time).repeat(batch_size, 1) * (goal[:, None, 1] - fingertip[:, None, 1])
+
+        self.traj = th.stack([x_points, y_points], dim=-1)
+
+        # ----- Stimuli 1 & 2 -----
+        stim_1 = th.zeros(batch_size, angles.shape[0])
+        stim_2 = th.zeros(batch_size, angles.shape[0])
+        
+        for b in range(batch_size):
+            stim_strength = 0.8 * np.exp(-0.5 * ((8 * np.abs(angles - angles[point_idx[b]])) / np.pi) ** 2)
+            if stim_idx[b] == 0:
+                stim_1[b] = th.tensor(stim_strength)
+            else:
+                stim_2[b] = th.tensor(stim_strength)
+
+        # Temporal stimulus inputs
+        self.stim_1 = th.cat([
+            th.zeros(batch_size, self.epoch_bounds["fixed_point"][1], stim_1.shape[-1]),
+            stim_1.unsqueeze(1).repeat(1, self.epoch_bounds["go"][1] - self.epoch_bounds["stimulus"][0], 1)
+        ], dim=1)
+
+        self.stim_2 = th.cat([
+            th.zeros(batch_size, self.epoch_bounds["fixed_point"][1], stim_2.shape[-1]),
+            stim_2.unsqueeze(1).repeat(1, self.epoch_bounds["go"][1] - self.epoch_bounds["stimulus"][0], 1)
+        ], dim=1)
+
+        self.hidden_goal = self.traj[:, 0, :].clone()
+        
+        # ----- MotorNet observations -----
+        action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
+
+        self.obs_buffer["proprioception"] = [self.get_proprioception()] * len(self.obs_buffer["proprioception"])
+        self.obs_buffer["vision"] = [self.get_vision()] * len(self.obs_buffer["vision"])
+        self.obs_buffer["action"] = [action] * self.action_frame_stacking
+
+        action = action if self.differentiable else self.detach(action)
+
+        obs = self.get_obs(0, deterministic=deterministic)
+
+        info = {
+            "states": self._maybe_detach_states(),
+            "action": action,
+            "noisy action": action,
+            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
+        }
+
+        return obs, info
+    
+class ReactGo(CogMotorEnv):
+   
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+        self._set_generator(seed=seed)
+
+        options = {} if options is None else options
+        batch_size: int = options.get('batch_size', 1)
+        deterministic: bool = options.get('deterministic', False)
+
+        # ------------------------------------- SET EPOCH DURATIONS
+
+        self.stable_time = 50  
+        self.movement_time = 40  
+        self.hold_time = 30  
+
+        stim_on = self.stable_time
+        stim_off = stim_on + self.movement_time
+
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "stim": (stim_on, stim_off),
+            "hold": (stim_off, stim_off + self.hold_time),
+        }
+
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+        #------------------------------------- START STATIC NETWORK INPUT (NOT FEEDBACK)
+
+        self.go_cue = th.cat([
+            th.zeros((batch_size, self.epoch_bounds["stim"][0], 1)),
+            th.ones((batch_size, self.epoch_bounds["hold"][1] - self.epoch_bounds["stim"][0], 1))
+        ], dim=1)
+
+        self.rule_input = th.zeros(batch_size, 20)
+        self.rule_input[:, 2] = 1
+
+        #------------------------------------- START KINEMATIC TRAJECTORY
+
+        fingertip = self.joint2cartesian(self.effector.init_joint_state(batch_size))[..., :2]
+        angles = th.linspace(0, 2 * np.pi, 33)[:-1]
+        point_idx = th.randint(0, angles.size(0), (batch_size,))
+        stim_angle = angles[point_idx]
+
+        points = th.stack([th.cos(stim_angle), th.sin(stim_angle)], dim=-1)
+
+        radius = 0.3
+
+        goal = fingertip + radius * response_points
+        self.hidden_goal = goal.clone()
+
+        # Movement trajectory: linear from fingertip to goal
+        traj_steps = th.linspace(0, 1, self.movement_time).to(goal.device)
+        x_points = fingertip[:, None, 0] + traj_steps[None, :] * (goal[:, None, 0] - fingertip[:, None, 0])
+        y_points = fingertip[:, None, 1] + traj_steps[None, :] * (goal[:, None, 1] - fingertip[:, None, 1])
+        self.traj = th.stack([x_points, y_points], dim=-1)
+
+        # ------------------------------------- OBSERVATION BUFFER INIT
+
+        action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
+
+        self.obs_buffer["proprioception"] = [self.get_proprioception()] * len(self.obs_buffer["proprioception"])
+        self.obs_buffer["vision"] = [self.get_vision()] * len(self.obs_buffer["vision"])
+        self.obs_buffer["action"] = [action] * self.action_frame_stacking
+
+        action = action if self.differentiable else self.detach(action)
+        obs = self.get_obs(0, deterministic=deterministic)
+
+        info = {
+            "states": self._maybe_detach_states(),
+            "action": action,
+            "noisy action": action,
+            "goal": self.hidden_goal if self.differentiable else self.detach(self.hidden_goal),
+        }
 
         return obs, info
