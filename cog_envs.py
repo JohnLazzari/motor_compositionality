@@ -201,8 +201,8 @@ class Go(CogMotorEnv):
         angles = th.linspace(0, 2 * np.pi, 33)[:-1]
 
         # this wont work yet cause everything else has shape batch_size (or I can assert reach_conds and batch_size are same shape)
-        #stim_idx = th.randint(0, 2)
-        stim_idx = 0
+        stim_idx = random.randint(0, 1)
+        print(stim_idx)
         point_idx = th.randint(0, angles.size(0), (batch_size,))
 
         # Compute (x, y) coordinates for each angle
@@ -225,14 +225,6 @@ class Go(CogMotorEnv):
         y_points = fingertip[:, None, 1] + th.linspace(0, 1, steps=self.movement_time).repeat(batch_size, 1) * (goal[:, None, 1] - fingertip[:, None, 1]) 
 
         self.traj = th.stack([x_points, y_points], dim=-1)
-
-        # We want to start target onset after stable epoch
-        #self.stim_1 = th.cat([
-            # [batch_size, stability timesteps, xy]
-            #th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], stim_1.shape[-1])),
-            # [batch_size, delay->hold timesteps, xy]
-            #stim_1.repeat(1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1)
-        #], dim=1)
 
         self.stim_1 = th.cat([
             th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], stim_1.shape[-1])),
@@ -340,7 +332,6 @@ class DelayGo(CogMotorEnv):
 
         self.traj = th.stack([x_points, y_points], dim=-1)
 
-        # ----- Stimuli 1 & 2 -----
         stim_1 = th.zeros(batch_size, angles.shape[0])
         stim_2 = th.zeros(batch_size, angles.shape[0])
         

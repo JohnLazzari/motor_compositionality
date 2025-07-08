@@ -214,10 +214,6 @@ def train_go_task():
     print("TRAINING GO TASK WITH RNN")
     train_cog(model_path, model_file, hp)
 
-def plot_cog(model_name):
-    plot_task_input_output_cog(model_name)
-
-
 if __name__ == "__main__":
 
     ### PARAMETERS ###
@@ -262,8 +258,7 @@ if __name__ == "__main__":
         run_train_subsets_held_out_base_model()
     elif args.experiment == "train_go_task":
         train_go_task()
-    elif args.experiment == "plot_input_output_cog":
-        plot_cog(args.model_name)
+    
 
 
     else:

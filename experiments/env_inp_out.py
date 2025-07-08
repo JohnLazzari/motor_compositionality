@@ -66,7 +66,7 @@ def plot_task_trajectories(model_name):
             effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
             cur_env = env_dict[env](effector=effector)
             
-            obs, info = cur_env.reset(testing=True, options=options)
+            obs, info = cur_env.reset(options=options)
 
             # Get kinematics and activity in a center out setting
             # On random and delay
@@ -247,12 +247,11 @@ def plot_task_input_output_cog(model_name):
 
     for env in cog_env_dict:
 
-        options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": 5, "delay_cond": 0}
+        options = {"batch_size": 11, "reach_conds": torch.arange(0, 32, 4), "speed_cond": 5, "delay_cond": 0}
 
         effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
         cur_env = cog_env_dict[env](effector=effector)
-        
-        obs, info = cur_env.reset(testing=True, options=options)
+        obs, info = cur_env.reset(options=options)
 
         for batch in range(options["batch_size"]):
 
@@ -302,12 +301,12 @@ def plot_task_input_output_cog(model_name):
             ax[3].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
             ax[3].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
 
-            ax[4].imshow(cur_env.traj[batch].T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax[4].imshow(cur_env.traj[batch].T, vmin=-1, vmax=1, cmap="viridis", aspect="auto")
             ax[4].spines['top'].set_visible(False)
             ax[4].spines['right'].set_visible(False)
             ax[4].spines['bottom'].set_visible(False)
             ax[4].set_xticks([])
-            ax[4].set_title("Tg Output (Only Movement Epoch)")
+            ax[4].set_title("Output")
 
             save_fig(os.path.join(exp_path, f"{env}_input_orientation{batch}"), eps=True)
 
@@ -464,5 +463,7 @@ if __name__ == "__main__":
         plot_task_input_output(args.model_name) 
     elif args.experiment == "plot_task_feedback":
         plot_task_feedback(args.model_name) 
+    elif args.experiment == "plot_input_output_cog":
+        plot_task_input_output_cog(args.model_name)
     else:
         raise ValueError("Experiment not in this file")
