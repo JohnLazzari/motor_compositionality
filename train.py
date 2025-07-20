@@ -7,7 +7,7 @@ import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cog_envs import Go
+from cog_envs import Go, AntiGo, DelayGo
 from model import RNNPolicy, GRUPolicy
 from losses import l1_dist, l1_rate, l1_weight, l1_muscle_act, simple_dynamics
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
@@ -415,10 +415,10 @@ def train_2link(model_path, model_file, hp=None):
 
 def train_cog(model_path, model_file, hp=None):
 
-    # Create model directory
+    # create model path for saving model and hp
     create_dir(model_path)
 
-    def_hp = DEF_HP  
+    def_hp = DEF_HP
     if hp is not None:
         def_hp.update(hp)
     hp = def_hp
@@ -433,11 +433,11 @@ def train_cog(model_path, model_file, hp=None):
         policy = RNNPolicy(
             hp["inp_size"],
             hp["hid_size"],
-            effector.n_muscles,
+            effector.n_muscles, 
             activation_name=hp["activation_name"],
-            noise_level_act=hp["noise_level_act"],
-            noise_level_inp=hp["noise_level_inp"],
-            constrained=hp["constrained"],
+            noise_level_act=hp["noise_level_act"], 
+            noise_level_inp=hp["noise_level_inp"], 
+            constrained=hp["constrained"], 
             dt=hp["dt"],
             t_const=hp["t_const"],
             device=device
@@ -450,75 +450,90 @@ def train_cog(model_path, model_file, hp=None):
     optimizer = torch.optim.Adam(policy.parameters(), lr=hp["lr"])
 
     losses = []
-    interval = 1
+    interval = 100
     best_test_loss = np.inf
 
-    
-    env = Go(effector=effector)
-    # network=policy --> Took out 
-
     cog_env_dict = {
-        "Go": Go
+        "Go": Go,
+        "AntiGo": AntiGo,
+        "DelayGo": DelayGo
     }
 
+    probs = [1/len(cog_env_dict)] * len(cog_env_dict)
+
     for batch in range(hp["epochs"]):
-        # Reset hidden states
+
+        # initialize batch
         x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
         h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
 
+        rand_env = random.choices(cog_env_dict, probs)
+        env = rand_env[0](effector=effector)
+        epoch_bounds = env.epoch_bounds
+
+        # Get first timestep
         obs, info = env.reset(options={"batch_size": hp["batch_size"]})
         terminated = False
 
+        # initial positions and targets
         xy = [info["states"]["fingertip"][:, None, :]]
         tg = [info["goal"][:, None, :]]
         muscle_acts = [info["states"]["muscle"][:, 0].unsqueeze(1)]
         hs = [h.unsqueeze(1)]
 
         timestep = 0
+        # simulate whole episode
+        while not terminated:  # will run until `max_ep_duration` is reached
 
-        while not terminated:
             x, h, action = policy(obs, x, h)
             obs, reward, terminated, info = env.step(timestep, action=action)
 
-            xy.append(info["states"]["fingertip"][:, None, :])
-            tg.append(info["goal"][:, None, :])
+            xy.append(info["states"]["fingertip"][:, None, :])  # trajectories
+            tg.append(info["goal"][:, None, :])  # targets
             muscle_acts.append(info["states"]["muscle"][:, 0].unsqueeze(1))
             hs.append(h.unsqueeze(1))
 
             timestep += 1
 
-        # Concatenate across time
+        # concatenate into a (batch_size, n_timesteps, xy) tensor
         xy = torch.cat(xy, axis=1)
         tg = torch.cat(tg, axis=1)
         muscle_acts = torch.cat(muscle_acts, axis=1)
         hs = torch.cat(hs, axis=1)
 
-        # === Loss calculation ===
-        loss = l1_dist(xy, tg)
+        # Implement loss function
+        loss = l1_dist(xy, tg)  # L1 loss on position
         loss += l1_rate(hs, hp["l1_rate"])
         loss += l1_weight(policy, hp["l1_weight"])
         loss += l1_muscle_act(muscle_acts, hp["l1_muscle_act"])
         if hp["activation_name"] != "tanh":
             loss += simple_dynamics(hs, policy.mrnn, weight=hp["simple_dynamics_weight"])
-
-        optimizer.zero_grad()
-        loss.backward()
         
-        torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=1.0)
+        # backward pass & update weights
+        optimizer.zero_grad() 
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=1.)  # important!
         optimizer.step()
         losses.append(loss.item())
 
         if (batch % interval == 0) and (batch != 0):
             print("Batch {}/{} Done, mean policy loss: {}".format(batch, hp["epochs"], sum(losses[-interval:])/interval))
             np.savetxt(os.path.join(model_path, "losses.txt"), losses)
-            torch.save({
+
+        if (batch % hp["save_iter"] == 0):
+            # Get test loss
+            test_loss = do_eval(policy, hp)
+            # If current test loss is better than previous, save model and update best loss
+            if test_loss <= best_test_loss:
+                best_test_loss = test_loss
+                torch.save({
                     'agent_state_dict': policy.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict()
                 }, model_path + "/" + model_file)
-            print("Model Saved!")
-            print(f"Directory: {model_path}/{model_file}")
-            print("\n")
-
+                print("Model Saved!")
+                print(f"Directory: {model_path}/{model_file}")
+                print("\n")
 
 def load_prev_training(model_path, model_file):
 
