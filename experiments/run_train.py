@@ -214,6 +214,20 @@ def train_go_task():
     print("TRAINING GO TASK WITH RNN")
     train_cog(model_path, model_file, hp)
 
+def train_antigo_task():
+    hp = {"hid_size": 256, "inp_size": 99}
+    model_path = "checkpoints/antigo_rnn_relu"
+    model_file = "antigo_rnn_relu.pth"
+    print("TRAINING ANTI GO TASK WITH RNN")
+    train_cog(model_path, model_file, hp)
+
+def train_delaygo_task():
+    hp = {"hid_size": 256, "inp_size": 99}
+    model_path = "checkpoints/delaygo_rnn_relu"
+    model_file = "antigo_rnn_relu.pth"
+    print("TRAINING DELAY GO TASK WITH RNN")
+    train_cog(model_path, model_file, hp)
+
 if __name__ == "__main__":
 
     ### PARAMETERS ###
@@ -258,8 +272,10 @@ if __name__ == "__main__":
         run_train_subsets_held_out_base_model()
     elif args.experiment == "train_go_task":
         train_go_task()
-    
-
+    elif args.experiment == "train_antigo_task":
+        train_antigo_task()
+    elif args.experiment == "train_delaygo_task":
+        train_delaygo_task()
 
     else:
         raise ValueError("Experiment not in this file")

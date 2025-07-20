@@ -18,7 +18,7 @@ from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial,
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 from envs import ComposableEnv
-from cog_envs import Go
+from cog_envs import Go, AntiGo, DelayGo 
 import matplotlib.pyplot as plt
 import numpy as np
 import config
@@ -228,16 +228,9 @@ def plot_task_input_output(model_name):
 
             save_fig(os.path.join(exp_path, f"{env}_input_orientation{batch}"), eps=True)
 
-
 def plot_task_input_output_cog(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task
         This is not for kinematics
-
-    Args:
-        config_path (_type_): _description_
-        model_path (_type_): _description_
-        model_file (_type_): _description_
-        exp_path (_type_): _description_
     """
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -255,61 +248,103 @@ def plot_task_input_output_cog(model_name):
 
         for batch in range(options["batch_size"]):
 
-            fig, ax = plt.subplots(5, 1)
-            fig.set_size_inches(3, 6)
+            fig_input = plt.figure(figsize=(6, 7)) 
+            gs = fig_input.add_gridspec(5, 2) 
+
+            ax0 = fig_input.add_subplot(gs[0, :])  # Rule Input
+            ax1 = fig_input.add_subplot(gs[1, :])  # Go Cue
+            ax2 = fig_input.add_subplot(gs[2, :])  # Stimulus 1
+            ax3 = fig_input.add_subplot(gs[3, :])  # Stimulus 2
+
             plt.rc('font', size=6)
 
-            ax[0].imshow(cur_env.rule_input[batch].unsqueeze(0).repeat(cur_env.max_ep_duration, 1).T, vmin=-1, vmax=1, cmap="seismic", aspect="auto")
-            
-            # Remove top and right only (common for minimalist style)
-            ax[0].spines['top'].set_visible(False)
-            ax[0].spines['right'].set_visible(False)
-            ax[0].spines['bottom'].set_visible(False)
-            ax[0].set_xticks([])
-            ax[0].set_title("Rule Input")
-            ax[0].axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
-            ax[0].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
-            ax[0].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+            ax0.imshow(cur_env.rule_input[batch].unsqueeze(0).repeat(cur_env.max_ep_duration, 1).T,
+                       vmin=-1, vmax=1, cmap="seismic", aspect="auto")
+            ax0.set_title("Rule Input")
+            ax0.set_xticks([])
+            ax0.spines['top'].set_visible(False)
+            ax0.spines['right'].set_visible(False)
+            ax0.spines['bottom'].set_visible(False)
+            ax0.axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax0.axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax0.axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
 
-            ax[1].plot(cur_env.go_cue[batch], color="blue")
-            ax[1].spines['top'].set_visible(False)
-            ax[1].spines['right'].set_visible(False)
-            ax[1].spines['bottom'].set_visible(False)
-            ax[1].set_xticks([])
-            ax[1].set_title("Go Cue")
-            ax[1].axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
-            ax[1].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
-            ax[1].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+            ax1.plot(cur_env.go_cue[batch], color="blue")
+            ax1.set_title("Go Cue")
+            ax1.set_xticks([])
+            ax1.spines['top'].set_visible(False)
+            ax1.spines['right'].set_visible(False)
+            ax1.spines['bottom'].set_visible(False)
+            ax1.axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax1.axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax1.axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
 
-            ax[2].imshow(cur_env.stim_1[batch].T, vmin=0, vmax=1, cmap="viridis", aspect="auto")
-            ax[2].spines['top'].set_visible(False)
-            ax[2].spines['right'].set_visible(False)
-            ax[2].spines['bottom'].set_visible(False)
-            ax[2].set_xticks([])
-            ax[2].set_title("Stimulus 1")
-            ax[2].axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
-            ax[2].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
-            ax[2].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+            ax2.imshow(cur_env.stim_1[batch].T, vmin=0, vmax=1, cmap="viridis", aspect="auto")
+            ax2.set_title("Stimulus 1")
+            ax2.set_xticks([])
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+            ax2.spines['bottom'].set_visible(False)
+            ax2.axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax2.axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax2.axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
 
-            ax[3].imshow(cur_env.stim_2[batch].T, vmin=0, vmax=1, cmap="viridis", aspect="auto")
-            ax[3].spines['top'].set_visible(False)
-            ax[3].spines['right'].set_visible(False)
-            ax[3].spines['bottom'].set_visible(False)
-            ax[3].set_xticks([])
-            ax[3].set_title("Stimulus 2")
-            ax[3].axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
-            ax[3].axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
-            ax[3].axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+            ax3.imshow(cur_env.stim_2[batch].T, vmin=0, vmax=1, cmap="viridis", aspect="auto")
+            ax3.set_title("Stimulus 2")
+            ax3.set_xticks([])
+            ax3.spines['top'].set_visible(False)
+            ax3.spines['right'].set_visible(False)
+            ax3.spines['bottom'].set_visible(False)
+            ax3.axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax3.axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax3.axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
 
-            ax[4].imshow(cur_env.traj[batch].T, vmin=-1, vmax=1, cmap="viridis", aspect="auto")
-            ax[4].spines['top'].set_visible(False)
-            ax[4].spines['right'].set_visible(False)
-            ax[4].spines['bottom'].set_visible(False)
-            ax[4].set_xticks([])
-            ax[4].set_title("Output")
+            fig_input.tight_layout()
+            fig_input.savefig(os.path.join(exp_path, f"{env}_input{batch}.png"), dpi=300)
+            plt.close(fig_input)
 
-            save_fig(os.path.join(exp_path, f"{env}_input_orientation{batch}"), eps=True)
+            #Output
+            fig_output = plt.figure(figsize=(6, 4))
+            gs_out = fig_output.add_gridspec(2, 2)
 
+            ax_x_out = fig_output.add_subplot(gs_out[0, 0])
+            ax_y_out = fig_output.add_subplot(gs_out[0, 1])
+            ax_traj_out = fig_output.add_subplot(gs_out[1, :])
+
+            ax_x_out.plot(cur_env.traj[batch][:, 0], color="darkorange")
+            ax_x_out.set_title("Output - X Position")
+            ax_x_out.set_xticks([])
+            ax_x_out.spines['top'].set_visible(False)
+            ax_x_out.spines['right'].set_visible(False)
+            ax_x_out.axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax_x_out.axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax_x_out.axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+
+            ax_y_out.plot(cur_env.traj[batch][:, 1], color="darkgreen")
+            ax_y_out.set_title("Output - Y Position")
+            ax_y_out.set_xticks([])
+            ax_y_out.spines['top'].set_visible(False)
+            ax_y_out.spines['right'].set_visible(False)
+            ax_y_out.axvline(cur_env.epoch_bounds["delay"][0], color="grey", linestyle="dashed")
+            ax_y_out.axvline(cur_env.epoch_bounds["movement"][0], color="grey", linestyle="dashed")
+            ax_y_out.axvline(cur_env.epoch_bounds["hold"][0], color="grey", linestyle="dashed")
+
+            traj = cur_env.traj[batch].cpu().numpy()
+            x = traj[:, 0]
+            y = traj[:, 1]
+            t = np.linspace(0, 1, len(x))
+            sc_out = ax_traj_out.scatter(x, y, c=t, cmap="plasma", s=10)
+            ax_traj_out.plot([x[0]], [y[0]], 'go', label="Start")
+            ax_traj_out.plot([x[-1]], [y[-1]], 'rx', label="Target")
+            ax_traj_out.set_title("Trajectory")
+            ax_traj_out.axis("equal")
+            ax_traj_out.legend(fontsize=6)
+            cbar = fig_output.colorbar(sc_out, ax=ax_traj_out, orientation="vertical", pad=0.02)
+            cbar.set_label("Normalized Time")
+
+            fig_output.tight_layout()
+            fig_output.savefig(os.path.join(exp_path, f"{env}_output{batch}.png"), dpi=300)
+            plt.close(fig_output)
 
 def plot_task_feedback(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task

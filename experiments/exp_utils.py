@@ -17,7 +17,7 @@ import os
 from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
-from cog_envs import Go
+from cog_envs import Go, AntiGo, DelayGo
 import matplotlib.pyplot as plt
 import numpy as np
 import config
@@ -52,7 +52,9 @@ env_dict = {
 }
 
 cog_env_dict = { 
-    "Go": Go
+    "Go": Go,
+    "AntiGo": AntiGo,
+    "DelayGo": DelayGo
 }
 
 def _test(
