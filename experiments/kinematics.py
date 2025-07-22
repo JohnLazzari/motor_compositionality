@@ -10,6 +10,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from train import train_2link
+from train import train_cog
 import motornet as mn
 from model import RNNPolicy, GRUPolicy, OrthogonalNet
 import torch
@@ -17,6 +18,7 @@ import os
 from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv, ComposableEnv
+from cog_envs import Go, AntiGo, DelayGo
 import matplotlib.pyplot as plt
 import numpy as np
 import config
@@ -35,6 +37,7 @@ import scipy
 from mRNNTorch.analysis import flow_field
 import matplotlib.patches as mpatches
 from exp_utils import _test, env_dict
+from exp_utils import cog_env_dict
 from itertools import product
 
 plt.rcParams.update({'font.size': 18})  # Sets default font size for all text
@@ -94,10 +97,60 @@ def plot_task_kinematics(model_name):
             plt.gca().spines['right'].set_visible(False)
             save_fig(os.path.join(exp_path, "ypos", f"{env}_speed{speed}_ypos"))
 
+def plot_task_kinematics_cog(model_name):
+    """ This function will simply plot the target at each timestep for different orientations of the task
+        This is not for kinematics
 
+    Args:
+        config_path (_type_): _description_
+        model_path (_type_): _description_
+        model_file (_type_): _description_
+        exp_path (_type_): _description_
+    """
+    model_path = f"checkpoints/{model_name}"
+    model_file = f"{model_name}.pth"
+    exp_path = f"results/{model_name}/kinematics"
 
+    plt.rc('figure', figsize=(4, 4))
 
+    for env in cog_env_dict:
+        for speed in range(10):
 
+            options = {"batch_size": 8, "reach_conds": torch.arange(0, 32, 4), "speed_cond": speed, "delay_cond": 1}
+
+            trial_data = _test(model_path, model_file, options, env=cog_env_dict[env])
+        
+            # Get kinematics and activity in a center out setting
+            # On random and delay
+            colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0])) 
+
+            for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
+                plt.plot(xy[:, 0], xy[:, 1], linewidth=4, color=colors[i], alpha=0.75)
+                plt.scatter(xy[0, 0], xy[0, 1], s=150, marker='x', color=colors[i])
+                plt.scatter(tg[-1, 0], tg[-1, 1], s=150, marker='^', color=colors[i])
+
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "scatter", f"{env}_speed{speed}_kinematics"), eps=True)
+
+            # Plot x coordinate only 
+            for i, xy in enumerate(trial_data["xy"]):
+                plt.plot(xy[:, 0], color=colors[i])
+
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "xpos", f"{env}_speed{speed}_xpos"))
+
+            # Plot y coordinate only 
+            for i, xy in enumerate(trial_data["xy"]):
+                plt.plot(xy[:, 1], color=colors[i])
+
+            # Access current axes and hide top/right spines
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            save_fig(os.path.join(exp_path, "ypos", f"{env}_speed{speed}_ypos"))
 
 def plot_task_kinematics_held_out_transfer(model_name):
     """ This function will simply plot the target at each timestep for different orientations of the task
@@ -417,5 +470,7 @@ if __name__ == "__main__":
         plot_task_kinematics_held_out_transfer(args.model_name) 
     elif args.experiment == "plot_speed_modulation":
         plot_speed_modulation(args.model_name) 
+    elif args.experiment == "plot_task_kinematics_cog":
+        plot_task_kinematics_cog(args.model_name) 
     else:
         raise ValueError("Experiment not in this file")

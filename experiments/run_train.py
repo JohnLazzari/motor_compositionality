@@ -208,25 +208,32 @@ def continue_training(model_name):
     load_prev_training(model_path, model_file)
 
 def train_go_task():
-    hp = {"hid_size": 256, "inp_size": 99}
+    hp = {"hid_size": 256}
     model_path = "checkpoints/go_rnn_relu"
     model_file = "go_rnn_relu.pth"
     print("TRAINING GO TASK WITH RNN")
-    train_cog(model_path, model_file, hp)
+    train_cog(model_path, model_file, "Go", hp)
 
 def train_antigo_task():
-    hp = {"hid_size": 256, "inp_size": 99}
+    hp = {"hid_size": 256}
     model_path = "checkpoints/antigo_rnn_relu"
     model_file = "antigo_rnn_relu.pth"
     print("TRAINING ANTI GO TASK WITH RNN")
-    train_cog(model_path, model_file, hp)
+    train_cog(model_path, model_file, "AntiGo", hp)
 
 def train_delaygo_task():
-    hp = {"hid_size": 256, "inp_size": 99}
+    hp = {"hid_size": 256}
     model_path = "checkpoints/delaygo_rnn_relu"
-    model_file = "antigo_rnn_relu.pth"
+    model_file = "delay_rnn_relu.pth"
     print("TRAINING DELAY GO TASK WITH RNN")
-    train_cog(model_path, model_file, hp)
+    train_cog(model_path, model_file, "DelayGo", hp)
+
+def train_all_tasks():
+    hp_all = {"hid_size": 256}
+    model_path_go = "checkpoints/all_rnn_relu"
+    model_file_go = "all_rnn_relu.pth"
+    print("TRAINING ALL TASK WITH RNN")
+    train_cog(model_path_go, model_file_go, None,hp_all)
 
 if __name__ == "__main__":
 
@@ -276,6 +283,8 @@ if __name__ == "__main__":
         train_antigo_task()
     elif args.experiment == "train_delaygo_task":
         train_delaygo_task()
+    elif args.experiment == "train_all_tasks":
+        train_all_tasks()
 
     else:
         raise ValueError("Experiment not in this file")
