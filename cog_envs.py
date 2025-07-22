@@ -123,7 +123,7 @@ class Go(CogMotorEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
+    def reset(self, testing=False, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
         """
         Uses the :meth:`Environment.reset()` method of the parent class :class:`Environment` that can be overwritten to 
         change the returned data. Here the goals (`i.e.`, the targets) are drawn from a random uniform distribution across

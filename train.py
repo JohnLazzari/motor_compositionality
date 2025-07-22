@@ -18,7 +18,7 @@ from itertools import product
 
 DEF_HP = {
     "network": "rnn",
-    "inp_size": 28,
+    "inp_size": 99,
     "hid_size": 512,
     "activation_name": "softplus",
     "noise_level_act": 0.1,
@@ -111,10 +111,6 @@ def do_eval(policy, hp, env_dict=None):
     print("\n")
     
     return total_test_loss
-
-
-
-
 
 def do_eval_single_task(policy, hp, task):
 
@@ -413,7 +409,7 @@ def train_2link(model_path, model_file, hp=None):
                 print("\n")
 
 
-def train_cog(model_path, model_file, hp=None):
+def train_cog(model_path, model_file, env_cog=None, hp=None):
 
     # create model path for saving model and hp
     create_dir(model_path)
@@ -454,25 +450,37 @@ def train_cog(model_path, model_file, hp=None):
     best_test_loss = np.inf
 
     cog_env_dict = {
-        "Go": Go,
-        "AntiGo": AntiGo,
-        "DelayGo": DelayGo
+    "Go": Go,
+    "AntiGo": AntiGo,
+    "DelayGo": DelayGo
     }
 
-    probs = [1/len(cog_env_dict)] * len(cog_env_dict)
+    cog_env_list = [
+    Go,
+    AntiGo,
+    DelayGo
+    ]
+
+    probs = [1/len(cog_env_list)] * len(cog_env_list)
 
     for batch in range(hp["epochs"]):
+
+        if env_cog is not None:
+            env_cls = cog_env_dict[env_cog]
+            env = env_cls(effector=effector)
+        else:
+            rand_env = random.choices(cog_env_list, probs)
+            env = rand_env[0](effector=effector)
 
         # initialize batch
         x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
         h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
 
-        rand_env = random.choices(cog_env_dict, probs)
-        env = rand_env[0](effector=effector)
         epoch_bounds = env.epoch_bounds
 
         # Get first timestep
         obs, info = env.reset(options={"batch_size": hp["batch_size"]})
+        obs = obs[:, :hp["inp_size"]]
         terminated = False
 
         # initial positions and targets
@@ -520,20 +528,6 @@ def train_cog(model_path, model_file, hp=None):
         if (batch % interval == 0) and (batch != 0):
             print("Batch {}/{} Done, mean policy loss: {}".format(batch, hp["epochs"], sum(losses[-interval:])/interval))
             np.savetxt(os.path.join(model_path, "losses.txt"), losses)
-
-        if (batch % hp["save_iter"] == 0):
-            # Get test loss
-            test_loss = do_eval(policy, hp)
-            # If current test loss is better than previous, save model and update best loss
-            if test_loss <= best_test_loss:
-                best_test_loss = test_loss
-                torch.save({
-                    'agent_state_dict': policy.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict()
-                }, model_path + "/" + model_file)
-                print("Model Saved!")
-                print(f"Directory: {model_path}/{model_file}")
-                print("\n")
 
 def load_prev_training(model_path, model_file):
 
@@ -803,11 +797,6 @@ def train_subsets_base_model(model_path, model_file, hp=None):
                 print("Model Saved!")
                 print(f"Directory: {model_path}/{model_file}")
                 print("\n")
-
-
-
-
-
 
 def train_subsets_held_out_base_model(
     load_model_path, 
