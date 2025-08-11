@@ -13,6 +13,8 @@ from train import train_2link
 import motornet as mn
 from model import RNNPolicy, GRUPolicy, OrthogonalNet
 import torch
+import torch.nn as nn
+import torch.optim as optim
 import os
 from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
@@ -52,6 +54,42 @@ env_dict = {
 
 
 
+def load_model(model_path, model_file, hp, noise_act, noise_inp, device, add_new_rule_inputs=False, num_new_inputs=10):
+    # Loading in model
+    if hp["network"] == "rnn":
+
+        policy = RNNPolicy(
+            hp["inp_size"],
+            hp["hid_size"],
+            6, # Number of muscles in effector 
+            activation_name=hp["activation_name"],
+            noise_level_act=noise_act, 
+            noise_level_inp=noise_inp, 
+            constrained=hp["constrained"], 
+            dt=hp["dt"],
+            t_const=hp["t_const"],
+            device=device,
+            add_new_rule_inputs=add_new_rule_inputs,
+            num_new_inputs=num_new_inputs
+        )
+
+        checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
+        policy.load_state_dict(checkpoint['agent_state_dict'])
+
+    elif hp["network"] == "gru":
+
+        policy = GRUPolicy(hp["inp_size"], hp["hid_size"], 6, batch_first=True)
+
+        checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
+        policy.load_state_dict(checkpoint['agent_state_dict'])
+
+    else:
+        raise ValueError("Not a valid architecture")
+
+    return policy
+
+
+
 def _test(
     model_path, 
     model_file, 
@@ -63,7 +101,8 @@ def _test(
     noise_act=0.1, 
     noise_inp=0.01,
     add_new_rule_inputs=False,
-    num_new_inputs=10
+    num_new_inputs=10,
+    rule_input=None
 ):
 
     """
@@ -114,30 +153,16 @@ def _test(
     hp = hp.copy()
     hp["batch_size"] = options["batch_size"]
 
-    # Loading in model
-    if hp["network"] == "rnn":
-        policy = RNNPolicy(
-            hp["inp_size"],
-            hp["hid_size"],
-            effector.n_muscles, 
-            activation_name=hp["activation_name"],
-            noise_level_act=noise_act, 
-            noise_level_inp=noise_inp, 
-            constrained=hp["constrained"], 
-            dt=hp["dt"],
-            t_const=hp["t_const"],
-            device=device,
-            add_new_rule_inputs=add_new_rule_inputs,
-            num_new_inputs=num_new_inputs
-        )
-        checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
-        policy.load_state_dict(checkpoint['agent_state_dict'])
-    elif hp["network"] == "gru":
-        policy = GRUPolicy(hp["inp_size"], hp["hid_size"], effector.n_muscles, batch_first=True)
-        checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
-        policy.load_state_dict(checkpoint['agent_state_dict'])
-    else:
-        raise ValueError("Not a valid architecture")
+    policy = load_model(
+        model_path, 
+        model_file, 
+        hp, 
+        noise_act, 
+        noise_inp, 
+        device, 
+        add_new_rule_inputs, 
+        num_new_inputs
+    )
 
     # initialize batch
     x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
@@ -158,6 +183,9 @@ def _test(
 
     # simulate whole episode
     while not terminated:  # will run until `max_ep_duration` is reached
+
+        if rule_input != None:
+            obs = _replace_rule_input(rule_input, obs)
 
         # Check if ablating feedback
         if feedback_mask is not None:
@@ -187,9 +215,393 @@ def _test(
     # Concatenate all data into single tensor
     for key in trial_data:
         trial_data[key] = torch.cat(trial_data[key], dim=1)
+
+    loss = l1_dist(trial_data["xy"], trial_data["tg"])  # L1 loss on position
+    trial_data["test_loss"] = loss
+
     trial_data["epoch_bounds"] = env.epoch_bounds
 
     return trial_data
+
+
+
+
+def composite_input_optimization(
+    model_path, 
+    model_file, 
+    options, 
+    env, 
+    desired_movement,
+    noise=False, 
+    noise_act=0.1, 
+    noise_inp=0.01,
+    add_new_rule_inputs=False,
+    num_new_inputs=10,
+    num_iters=250
+):
+
+    """
+    Runs a test episode in the specified environment using a trained RNN or GRU policy.
+
+    Parameters:
+    -----------
+    model_path : str
+        Path to the trained model directory.
+    model_file : str
+        Filename of the model checkpoint.
+    options : dict
+        Dictionary of environment and test configuration options (e.g., batch size).
+    env : callable
+        Environment constructor. Should accept an effector keyword argument.
+    stim : torch.Tensor, optional
+        Tensor to silence or stimulate specific hidden units. Default is None.
+    feedback_mask : torch.Tensor, optional
+        Mask to ablate parts of the observation vector. Default is None.
+    noise : bool, optional
+        Whether to inject noise into the network. Default is False.
+    noise_act : float, optional
+        Standard deviation of noise added to activations. Default is 0.1.
+    noise_inp : float, optional
+        Standard deviation of noise added to inputs. Default is 0.01.
+    add_new_rule_inputs : bool, optional
+        Whether to add additional rule inputs to the RNN. Default is False.
+    num_new_inputs : int, optional
+        Number of new rule inputs to add if `add_new_rule_inputs` is True. Default is 10.
+
+    Returns:
+    --------
+    trial_data : dict
+        Dictionary containing recorded trajectories and internal states for the episode, including:
+            - 'h', 'x': hidden and internal states
+            - 'action': actions taken by the model
+            - 'obs': observations received
+            - 'xy', 'tg': fingertip positions and target positions
+            - 'muscle_acts': muscle activations
+            - 'epoch_bounds': dictionary from the environment
+    """
+
+    device = "cpu"
+    hp = load_hp(model_path)
+    hp = hp.copy()
+    hp["batch_size"] = options["batch_size"]
+
+    policy = load_model(
+        model_path, 
+        model_file, 
+        hp, 
+        noise_act, 
+        noise_inp, 
+        device, 
+        add_new_rule_inputs, 
+        num_new_inputs
+    )
+
+    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+    inp1, inp2, inp3, inp4, inp5, inp6, optimizer = create_composite_input(desired_movement, options)
+    
+    best_trial_data = {}
+    best_loss = np.inf
+    training_losses = []
+
+    print(f"\nBeginning optimization for {desired_movement}")
+
+    for it in range(num_iters):
+
+        # initialize batch
+        x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
+        h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
+        
+        env_tmp = env(effector=effector)
+        obs, info = env_tmp.reset(testing=True, options=options)
+
+        terminated = False
+        trial_data = {}
+        timesteps = 0
+
+        trial_data["h"] = []
+        trial_data["x"] = []
+        trial_data["action"] = []
+        trial_data["muscle_acts"] = []
+        trial_data["obs"] = []
+        trial_data["xy"] = []
+        trial_data["tg"] = []
+
+        # simulate whole episode
+        while not terminated:  # will run until `max_ep_duration` is reached
+
+            # Check if doing composite inputs
+            composite_inp = torch.cat([inp1, inp2, inp3, inp4, inp5, inp6], dim=1)
+            obs = _replace_rule_input(composite_inp, obs)
+
+            x, h, action = policy(obs, x, h, noise=noise)
+
+            # Take step in motornet environment
+            obs, reward, terminated, info = env_tmp.step(timesteps, action=action)
+
+            timesteps += 1
+
+            # Save all information regarding episode step
+            trial_data["h"].append(h.unsqueeze(1))  # trajectories
+            trial_data["x"].append(x.unsqueeze(1))  # trajectories
+            trial_data["action"].append(action.unsqueeze(1))  # targets
+            trial_data["obs"].append(obs.unsqueeze(1))  # targets
+            trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
+            trial_data["tg"].append(info["goal"][:, None, :])  # targets
+            trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
+
+        # Concatenate all data into single tensor
+        for key in trial_data:
+            trial_data[key] = torch.cat(trial_data[key], dim=1)
+
+        loss = l1_dist(trial_data["xy"], trial_data["tg"])  # L1 loss on position
+        print(f"loss at iteration {it}: {loss.item()}")
+        training_losses.append(loss.item())
+
+        trial_data["rule_input"] = composite_inp.detach().clone()
+
+        if loss < best_loss:
+            best_trial_data = trial_data
+            best_loss = loss.item()
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    for key in trial_data:
+        best_trial_data[key] = best_trial_data[key].detach()
+    best_trial_data["epoch_bounds"] = env_tmp.epoch_bounds
+    best_trial_data["test_loss"] = training_losses
+    
+    return best_trial_data
+
+
+
+
+
+def test_sequential_inputs(
+    model_path, 
+    model_file, 
+    options, 
+    extension,
+    retraction,
+    noise=False, 
+    noise_act=0.1, 
+    noise_inp=0.01
+):
+
+    """
+    Runs a test episode in the specified environment using a trained RNN or GRU policy.
+
+    Parameters:
+    -----------
+    model_path : str
+        Path to the trained model directory.
+    model_file : str
+        Filename of the model checkpoint.
+    options : dict
+        Dictionary of environment and test configuration options (e.g., batch size).
+    env : callable
+        Environment constructor. Should accept an effector keyword argument.
+    stim : torch.Tensor, optional
+        Tensor to silence or stimulate specific hidden units. Default is None.
+    feedback_mask : torch.Tensor, optional
+        Mask to ablate parts of the observation vector. Default is None.
+    noise : bool, optional
+        Whether to inject noise into the network. Default is False.
+    noise_act : float, optional
+        Standard deviation of noise added to activations. Default is 0.1.
+    noise_inp : float, optional
+        Standard deviation of noise added to inputs. Default is 0.01.
+    add_new_rule_inputs : bool, optional
+        Whether to add additional rule inputs to the RNN. Default is False.
+    num_new_inputs : int, optional
+        Number of new rule inputs to add if `add_new_rule_inputs` is True. Default is 10.
+
+    Returns:
+    --------
+    trial_data : dict
+        Dictionary containing recorded trajectories and internal states for the episode, including:
+            - 'h', 'x': hidden and internal states
+            - 'action': actions taken by the model
+            - 'obs': observations received
+            - 'xy', 'tg': fingertip positions and target positions
+            - 'muscle_acts': muscle activations
+            - 'epoch_bounds': dictionary from the environment
+    """
+
+    device = "cpu"
+    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+    extension_env = extension(effector=effector)
+    retraction_env = retraction(effector=effector)
+
+    hp = load_hp(model_path)
+    hp = hp.copy()
+    hp["batch_size"] = options["batch_size"]
+
+    policy = load_model(
+        model_path, 
+        model_file, 
+        hp, 
+        noise_act, 
+        noise_inp, 
+        device
+    )
+
+    # initialize batch
+    x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
+    h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
+    
+    obs, info = retraction_env.reset(testing=True, options=options)
+    _, _ = extension_env.reset(testing=True, options=options)
+
+    extension_rule_input = extension_env.rule_input
+    retraction_rule_input = retraction_env.rule_input
+
+    middle_movement = int((retraction_env.epoch_bounds["movement"][1] + retraction_env.epoch_bounds["movement"][0]) / 2)
+    terminated = False
+    trial_data = {}
+    timesteps = 0
+
+    trial_data["h"] = []
+    trial_data["x"] = []
+    trial_data["action"] = []
+    trial_data["muscle_acts"] = []
+    trial_data["obs"] = []
+    trial_data["xy"] = []
+    trial_data["tg"] = []
+
+    # simulate whole episode
+    while not terminated:  # will run until `max_ep_duration` is reached
+
+        with torch.no_grad():
+
+            if timesteps < middle_movement:
+                obs = _replace_rule_input(extension_rule_input, obs)
+            
+            if timesteps == middle_movement:
+                for t in range(25):
+                    obs = _replace_rule_input(extension_rule_input, obs)
+                    # Check if silencing units 
+                    x, h, _ = policy(obs, x, h, noise=noise)
+
+            # Check if silencing units 
+            x, h, action = policy(obs, x, h, noise=noise)
+
+            # Take step in motornet environment
+            obs, reward, terminated, info = retraction_env.step(timesteps, action=action)
+
+        timesteps += 1
+
+        # Save all information regarding episode step
+        trial_data["h"].append(h.unsqueeze(1))  # trajectories
+        trial_data["x"].append(x.unsqueeze(1))  # trajectories
+        trial_data["action"].append(action.unsqueeze(1))  # targets
+        trial_data["obs"].append(obs.unsqueeze(1))  # targets
+        trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
+        trial_data["tg"].append(info["goal"][:, None, :])  # targets
+        trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
+
+    # Concatenate all data into single tensor
+    for key in trial_data:
+        trial_data[key] = torch.cat(trial_data[key], dim=1)
+
+    loss = l1_dist(trial_data["xy"], trial_data["tg"])  # L1 loss on position
+    trial_data["test_loss"] = loss
+
+    trial_data["epoch_bounds"] = retraction_env.epoch_bounds
+
+    return trial_data
+
+
+
+def create_composite_input(desired_movement, options):
+    # desired movement represents the end result kinematic (say a curved reach)
+    # The composite inputs that generate that movement will be manually crafted and tested
+
+    # Get the rule input for each env with correct batch size
+    env_rule_inputs = {}
+    for env in env_dict:
+        effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+        env_tmp = env_dict[env](effector=effector)
+        _, _ = env_tmp.reset(testing=True, options=options)
+        env_rule_inputs[env] = env_tmp.rule_input
+
+    # Desired movement can be any movement except reach and reachback
+    if desired_movement == "DlyHalfReach":
+
+        reach_inp = torch.zeros(size=(options["batch_size"], 1))
+        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
+
+        optimizer = optim.Adam([clkcr_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
+    
+    # Desired movement can be any movement except reach and reachback
+    if desired_movement == "DlyHalfCircleClk":
+
+        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        clkcr_inp = torch.zeros(size=(options["batch_size"], 1))
+        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
+
+        optimizer = optim.Adam([reach_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
+
+    elif desired_movement == "DlyHalfCircleCClk":
+
+        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        cclkcr_inp = torch.zeros(size=(options["batch_size"], 1))
+        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
+
+        optimizer = optim.Adam([reach_inp, clkcr_inp, sin_inp, invsin_inp], lr=1e-1)
+
+    elif desired_movement == "DlySinusoid": 
+
+        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        sin_inp = torch.zeros(size=(options["batch_size"], 1))
+        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
+
+        optimizer = optim.Adam([reach_inp, clkcr_inp, cclkcr_inp, invsin_inp], lr=1e-1)
+
+    elif desired_movement == "DlySinusoidInv":
+
+        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        invsin_inp = torch.zeros(size=(options["batch_size"], 1))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
+
+        optimizer = optim.Adam([reach_inp, clkcr_inp, cclkcr_inp, sin_inp], lr=1e-1)
+
+    return reach_inp, clkcr_inp, cclkcr_inp, sin_inp, invsin_inp, other_inputs, optimizer
+
+
+
+
+def _replace_rule_input(composite_inp, obs):
+    B, N = obs.shape
+    # This will not account for greater than two
+    if composite_inp.dim() < 2:
+        composite_inp = composite_inp.repeat(B, 1)
+    obs_new_rule = torch.cat([composite_inp, obs[:, 10:]], dim=1)
+    return obs_new_rule
+
+
+
+
+
+def get_middle_movement(trial_data):
+    return int((trial_data["epoch_bounds"]["movement"][1] + trial_data["epoch_bounds"]["movement"][0]) / 2)
 
 
 
@@ -214,7 +626,7 @@ def split_movement_epoch(trial_data, task_period, system):
         2D array of system data for the selected epoch segment.
     """
 
-    middle_movement = int((trial_data["epoch_bounds"]["movement"][1] + trial_data["epoch_bounds"]["movement"][0]) / 2)
+    middle_movement = get_middle_movement(trial_data)
 
     if task_period == "first":
         trial_data_h_epoch = trial_data[system][:, trial_data["epoch_bounds"]["movement"][0]:middle_movement]

@@ -15,6 +15,7 @@ import numpy as np
 import config
 import tqdm as tqdm
 from exp_utils import _test, env_dict
+from plt_utils import standard_2d_ax
 
 plt.rcParams.update({'font.size': 18})  # Sets default font size for all text
 
@@ -185,6 +186,41 @@ def plot_training_loss(model_name):
 
 
 
+def plot_transfer_losses():
+    
+    model_names = [
+        "rnn256_softplus_heldout_transfer",
+        "rnn256_softplus_heldout_sin_transfer",
+        "rnn256_softplus_heldout_reach_transfer",
+        "rnn256_softplus_heldout_nosin_transfer",
+        "rnn256_softplus_heldout_nocr_transfer",
+        "rnn256_softplus_heldout_cr_transfer"
+    ]
+
+    labels = [
+        "all",
+        "sin",
+        "reach",
+        "nosin",
+        "nocr",
+        "cr"
+    ]
+
+    fig, ax = standard_2d_ax()
+    colors = plt.cm.Set2(np.linspace(0, 1, 6)) 
+    for c, model in enumerate(model_names):
+        model_path = f"checkpoints/{model}"
+        losses = np.loadtxt(os.path.join(model_path, "losses.txt"))
+        avg_losses = []
+        for i in range(0, len(losses)-100, 100):
+            avg_losses.append(sum(losses[i:i+100])/100)
+        ax.plot(avg_losses, color=colors[c], linewidth=4, label=labels[c])
+    #ax.legend()
+    save_fig("results/across_model_performance/transfer_losses", eps=True)
+
+
+
+
 
 if __name__ == "__main__":
 
@@ -198,5 +234,7 @@ if __name__ == "__main__":
         plot_test_performance_held_out(args.model_name) 
     elif args.experiment == "plot_training_loss":
         plot_single_unit_psth(args.model_name) 
+    elif args.experiment == "plot_transfer_losses":
+        plot_transfer_losses() 
     else:
         raise ValueError("Experiment not in this file")

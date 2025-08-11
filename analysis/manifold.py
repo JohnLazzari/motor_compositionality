@@ -21,12 +21,35 @@ from losses import l1_dist
 import scipy
 from mRNNTorch.analysis import flow_field
 import warnings
+from tensor_maximum_entropy.tme import sampleTME, fitMaxEntropy
+from tensor_maximum_entropy.utils import summarizeLDS, extractFeatures
 warnings.filterwarnings("ignore")
 
 
+def TME(dataTensor, model_dim, numSurrogates=10):
+    dims = dataTensor.shape
+    dataTensor = dataTensor.reshape(dims, order='F')
+
+    R2_data = summarizeLDS(dataTensor, model_dim)
+    targetSigmaT, targetSigmaN, targetSigmaC, M = extractFeatures(dataTensor)
+    meanTensor = M['TNC']
+    surrogates = []
+
+    lagrangians, objCost, logObjperIter, meanTensor, eigVectors = fitMaxEntropy((targetSigmaT, targetSigmaN, targetSigmaC), meanTensor)
+
+    for i in range(numSurrogates):
+        print(f"Surrogate {i + 1}/{numSurrogates}")
+        surrTensor = sampleTME(lagrangians, objCost, logObjperIter, meanTensor, eigVectors)
+        surrTensor = surrTensor.squeeze()
+        surrogates.append(surrTensor)
+
+    return np.concatenate(surrogates, axis=-1)
 
 
-def principal_angles(combinations, combination_labels, mode, num_comps=None, control=True):
+
+
+
+def principal_angles(combinations, baseline_data, mode, hid_size, num_comps=None, control=True):
 
     """
         Perform manifold analysis (principle angles and VAF)
@@ -41,19 +64,27 @@ def principal_angles(combinations, combination_labels, mode, num_comps=None, con
 
     if mode == "h":
         num_comps = 12 if num_comps is None else num_comps
-        baseline_dim = 256
     elif mode == "muscle_acts":
         num_comps = 3 if num_comps is None else num_comps
-        baseline_dim = 6
 
     if control == True:
         # Create a random manifold as a control
-        random_matrices = np.random.randn(5000, baseline_dim, num_comps)
-        random_bases = np.empty(shape=(5000, num_comps, baseline_dim))
-        for basis in range(5000):
+        random_matrices = np.random.randn(10000, hid_size, num_comps)
+        random_bases = np.empty(shape=(10000, num_comps, hid_size))
+        for basis in range(10000):
             q, _ = np.linalg.qr(random_matrices[basis])
             random_bases[basis] = q.T
+    """
+    if control == True:
+        # Baseline data should be of shape [B, T, N], where B is from all conditions across tasks
+        # splitting extensions and retractions (for now)
 
+        baseline_data = baseline_data.transpose((1, 2, 0)) # Reshape array for TME implementation
+        model_dim = hid_size
+        surrogate_data = TME(baseline_data, model_dim)
+        surrogate_data = surrogate_data.transpose((2, 0, 1))
+    """
+        
     for i, combination in enumerate(combinations):
         
         # ------------------------------------ GET PRINCIPLE ANGLES
@@ -78,10 +109,19 @@ def principal_angles(combinations, combination_labels, mode, num_comps=None, con
 
     if control == True:
         # Get principle angles control
-        for i in range(5000):
-            rand1 = np.random.randint(2, 5000-1)
-            rand2 = np.random.randint(0, rand1-1)
-            inner_prod_mat = random_bases[rand1] @ random_bases[rand2].T # Should be m x m
+        for i in range(10000):
+            """
+            a, b = np.random.choice(surrogate_data.shape[0], size=2, replace=False)
+            pca1 = PCA()
+            pca2 = PCA()
+            pca1.fit(surrogate_data[a])
+            pca2.fit(surrogate_data[b])
+            pca1_comps = pca1.components_[:num_comps]
+            pca2_comps = pca2.components_[:num_comps]
+            inner_prod_mat = pca1_comps @ pca2_comps.T # Should be m x m
+            """
+            a, b = np.random.choice(random_bases.shape[0], size=2, replace=False)
+            inner_prod_mat = random_bases[a] @ random_bases[b].T # Should be m x m
             U, s, Vh = np.linalg.svd(inner_prod_mat)
             angles = np.degrees(np.arccos(s))
             control_list.append(angles)
@@ -95,7 +135,7 @@ def principal_angles(combinations, combination_labels, mode, num_comps=None, con
 
 
 
-def vaf_ratio(combinations, mode, num_comps=None, control=True):
+def vaf_ratio(combinations, mode, hid_size, num_comps=None, control=True):
 
     # Only use two muscle PCs for this task, but use three for the one above
 
@@ -104,7 +144,7 @@ def vaf_ratio(combinations, mode, num_comps=None, control=True):
 
     if mode == "h":
         num_comps = 12 if num_comps is None else num_comps
-        baseline_dim = 256
+        baseline_dim = hid_size
         percentile = 90
     elif mode == "muscle_acts":
         num_comps = 2 if num_comps is None else num_comps

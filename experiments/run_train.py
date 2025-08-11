@@ -8,6 +8,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from train import train_2link, load_prev_training, train_compositional_env_base_model, train_subsets_base_model, train_subsets_held_out_base_model
+from envs import DlyHalfReach, DlyHalfCircleClk, DlySinusoid, DlySinusoidInv
+from envs import DlyFullReach, DlyFullCircleClk, DlyFigure8, DlyFigure8Inv
 import config
 import tqdm as tqdm
 
@@ -32,25 +34,163 @@ def run_train_compositional_env_base_model():
     )
 
 
-def run_train_subsets_base_model():
+def run_train_subsets_all_base_model():
     """
         This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
         for later transfer learning.
     """
     # Use input size for original network, will manually change it using add_new_rule_inputs
     hp = {"hid_size": 256}
+    env_dict = {
+        "DlyHalfReach": DlyHalfReach, 
+        "DlyHalfCircleClk": DlyHalfCircleClk, 
+        "DlySinusoid": DlySinusoid, 
+        "DlySinusoidInv": DlySinusoidInv, 
+        "DlyFullReach": DlyFullReach,
+        "DlyFullCircleClk": DlyFullCircleClk,
+        "DlyFigure8": DlyFigure8,
+        "DlyFigure8Inv": DlyFigure8Inv
+    }
 
     model_path = "checkpoints/rnn256_softplus_heldout"
     model_file = "rnn256_softplus_heldout.pth"
 
-    print("TRAINING BASE MODEL ON TASK SUBSETS FOR HELD OUT TESTING")
+    print("TRAINING BASE MODEL ON ALL TASK SUBSETS FOR HELD OUT TESTING")
     # leave hp as default
     train_subsets_base_model(
         model_path, 
         model_file, 
-        hp=hp
+        hp=hp,
+        env_dict=env_dict
     )
 
+def run_train_subsets_nocr_base_model():
+    """
+        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
+        for later transfer learning.
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256}
+    env_dict = {
+        "DlyHalfReach": DlyHalfReach, 
+        "DlySinusoid": DlySinusoid, 
+        "DlySinusoidInv": DlySinusoidInv, 
+        "DlyFullReach": DlyFullReach,
+        "DlyFigure8": DlyFigure8,
+        "DlyFigure8Inv": DlyFigure8Inv
+    }
+
+    model_path = "checkpoints/rnn256_softplus_heldout_nocr"
+    model_file = "rnn256_softplus_heldout_nocr.pth"
+
+    print("TRAINING BASE MODEL ON NOCR TASK SUBSETS FOR HELD OUT TESTING")
+    # leave hp as default
+    train_subsets_base_model(
+        model_path, 
+        model_file, 
+        hp=hp,
+        env_dict=env_dict
+    )
+
+def run_train_subsets_nosin_base_model():
+    """
+        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
+        for later transfer learning.
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256}
+    env_dict = {
+        "DlyHalfReach": DlyHalfReach, 
+        "DlyHalfCircleClk": DlyHalfCircleClk, 
+        "DlyFullReach": DlyFullReach,
+        "DlyFullCircleClk": DlyFullCircleClk,
+    }
+
+    model_path = "checkpoints/rnn256_softplus_heldout_nosin"
+    model_file = "rnn256_softplus_heldout_nosin.pth"
+
+    print("TRAINING BASE MODEL ON NOSIN TASK SUBSETS FOR HELD OUT TESTING")
+    # leave hp as default
+    train_subsets_base_model(
+        model_path, 
+        model_file, 
+        hp=hp,
+        env_dict=env_dict
+    )
+
+def run_train_subsets_reach_base_model():
+    """
+        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
+        for later transfer learning.
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256}
+    env_dict = {
+        "DlyHalfReach": DlyHalfReach, 
+        "DlyFullReach": DlyFullReach
+    }
+
+    model_path = "checkpoints/rnn256_softplus_heldout_reach"
+    model_file = "rnn256_softplus_heldout_reach.pth"
+
+    print("TRAINING BASE MODEL ON REACH TASK SUBSETS FOR HELD OUT TESTING")
+    # leave hp as default
+    train_subsets_base_model(
+        model_path, 
+        model_file, 
+        hp=hp,
+        env_dict=env_dict
+    )
+
+def run_train_subsets_cr_base_model():
+    """
+        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
+        for later transfer learning.
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256}
+    env_dict = {
+        "DlyHalfCircleClk": DlyHalfCircleClk, 
+        "DlyFullCircleClk": DlyFullCircleClk,
+    }
+
+    model_path = "checkpoints/rnn256_softplus_heldout_cr"
+    model_file = "rnn256_softplus_heldout_cr.pth"
+
+    print("TRAINING BASE MODEL ON CR TASK SUBSETS FOR HELD OUT TESTING")
+    # leave hp as default
+    train_subsets_base_model(
+        model_path, 
+        model_file, 
+        hp=hp,
+        env_dict=env_dict
+    )
+
+def run_train_subsets_sin_base_model():
+    """
+        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
+        for later transfer learning.
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256}
+    env_dict = {
+        "DlySinusoid": DlySinusoid, 
+        "DlySinusoidInv": DlySinusoidInv, 
+        "DlyFigure8": DlyFigure8,
+        "DlyFigure8Inv": DlyFigure8Inv
+    }
+
+    model_path = "checkpoints/rnn256_softplus_heldout_sin"
+    model_file = "rnn256_softplus_heldout_sin.pth"
+
+    print("TRAINING BASE MODEL ON SIN TASK SUBSETS FOR HELD OUT TESTING")
+    # leave hp as default
+    train_subsets_base_model(
+        model_path, 
+        model_file, 
+        hp=hp,
+        env_dict=env_dict
+    )
 
 def run_train_subsets_held_out_base_model():
     """
@@ -67,6 +207,126 @@ def run_train_subsets_held_out_base_model():
     save_model_file = "rnn256_softplus_heldout_transfer.pth"
 
     print("TRAINING BASE MODEL ON TASK SUBSETS WITH TRANSFER")
+    # leave hp as default
+    train_subsets_held_out_base_model(
+        load_model_path, 
+        load_model_file, 
+        save_model_path, 
+        save_model_file, 
+        hp=hp
+    )
+
+def run_train_subsets_nocr_held_out_base_model():
+    """
+        This will run training on environments sinusoidinv and figure8inv
+        with fixed hidden and input weights except for rule inputs
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256, "epochs": 75000}
+
+    load_model_path = "checkpoints/rnn256_softplus_heldout_nocr"
+    load_model_file = "rnn256_softplus_heldout_nocr.pth"
+
+    save_model_path = "checkpoints/rnn256_softplus_heldout_nocr_transfer"
+    save_model_file = "rnn256_softplus_heldout_nocr_transfer.pth"
+
+    print("TRAINING NOCR MODEL ON TASK SUBSETS WITH TRANSFER")
+    # leave hp as default
+    train_subsets_held_out_base_model(
+        load_model_path, 
+        load_model_file, 
+        save_model_path, 
+        save_model_file, 
+        hp=hp
+    )
+
+def run_train_subsets_nosin_held_out_base_model():
+    """
+        This will run training on environments sinusoidinv and figure8inv
+        with fixed hidden and input weights except for rule inputs
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256, "epochs": 75000}
+
+    load_model_path = "checkpoints/rnn256_softplus_heldout_nosin"
+    load_model_file = "rnn256_softplus_heldout_nosin.pth"
+
+    save_model_path = "checkpoints/rnn256_softplus_heldout_nosin_transfer"
+    save_model_file = "rnn256_softplus_heldout_nosin_transfer.pth"
+
+    print("TRAINING NOSIN MODEL ON TASK SUBSETS WITH TRANSFER")
+    # leave hp as default
+    train_subsets_held_out_base_model(
+        load_model_path, 
+        load_model_file, 
+        save_model_path, 
+        save_model_file, 
+        hp=hp
+    )
+
+def run_train_subsets_reach_held_out_base_model():
+    """
+        This will run training on environments sinusoidinv and figure8inv
+        with fixed hidden and input weights except for rule inputs
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256, "epochs": 75000}
+
+    load_model_path = "checkpoints/rnn256_softplus_heldout_reach"
+    load_model_file = "rnn256_softplus_heldout_reach.pth"
+
+    save_model_path = "checkpoints/rnn256_softplus_heldout_reach_transfer"
+    save_model_file = "rnn256_softplus_heldout_reach_transfer.pth"
+
+    print("TRAINING REACH MODEL ON TASK SUBSETS WITH TRANSFER")
+    # leave hp as default
+    train_subsets_held_out_base_model(
+        load_model_path, 
+        load_model_file, 
+        save_model_path, 
+        save_model_file, 
+        hp=hp
+    )
+
+def run_train_subsets_cr_held_out_base_model():
+    """
+        This will run training on environments sinusoidinv and figure8inv
+        with fixed hidden and input weights except for rule inputs
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256, "epochs": 75000}
+
+    load_model_path = "checkpoints/rnn256_softplus_heldout_cr"
+    load_model_file = "rnn256_softplus_heldout_cr.pth"
+
+    save_model_path = "checkpoints/rnn256_softplus_heldout_cr_transfer"
+    save_model_file = "rnn256_softplus_heldout_cr_transfer.pth"
+
+    print("TRAINING CR MODEL ON TASK SUBSETS WITH TRANSFER")
+    # leave hp as default
+    train_subsets_held_out_base_model(
+        load_model_path, 
+        load_model_file, 
+        save_model_path, 
+        save_model_file, 
+        hp=hp
+    )
+
+def run_train_subsets_sin_held_out_base_model():
+    """
+        This will run training on environments sinusoidinv and figure8inv
+        with fixed hidden and input weights except for rule inputs
+    """
+    # Use input size for original network, will manually change it using add_new_rule_inputs
+    hp = {"hid_size": 256, "epochs": 75000}
+
+    load_model_path = "checkpoints/rnn256_softplus_heldout_sin"
+    load_model_file = "rnn256_softplus_heldout_sin.pth"
+
+    save_model_path = "checkpoints/rnn256_softplus_heldout_sin_transfer"
+    save_model_file = "rnn256_softplus_heldout_sin_transfer.pth"
+
+    print("TRAINING SIN MODEL ON TASK SUBSETS WITH TRANSFER")
     # leave hp as default
     train_subsets_held_out_base_model(
         load_model_path, 
@@ -243,14 +503,34 @@ if __name__ == "__main__":
         train_gru128()
     elif args.experiment == "continue_training":
         continue_training(args.model_name)
-    
-
     elif args.experiment == "run_train_compositional_env_base_model":
         run_train_compositional_env_base_model()
-    elif args.experiment == "run_train_subsets_base_model":
-        run_train_subsets_base_model()
+
+    elif args.experiment == "run_train_subsets_all_base_model":
+        run_train_subsets_all_base_model()
+    elif args.experiment == "run_train_subsets_nocr_base_model":
+        run_train_subsets_nocr_base_model()
+    elif args.experiment == "run_train_subsets_nosin_base_model":
+        run_train_subsets_nosin_base_model()
+    elif args.experiment == "run_train_subsets_reach_base_model":
+        run_train_subsets_reach_base_model()
+    elif args.experiment == "run_train_subsets_cr_base_model":
+        run_train_subsets_cr_base_model()
+    elif args.experiment == "run_train_subsets_sin_base_model":
+        run_train_subsets_sin_base_model()
+
     elif args.experiment == "run_train_subsets_held_out_base_model":
         run_train_subsets_held_out_base_model()
+    elif args.experiment == "run_train_subsets_nocr_held_out_base_model":
+        run_train_subsets_nocr_held_out_base_model()
+    elif args.experiment == "run_train_subsets_nosin_held_out_base_model":
+        run_train_subsets_nosin_held_out_base_model()
+    elif args.experiment == "run_train_subsets_reach_held_out_base_model":
+        run_train_subsets_reach_held_out_base_model()
+    elif args.experiment == "run_train_subsets_cr_held_out_base_model":
+        run_train_subsets_cr_held_out_base_model()
+    elif args.experiment == "run_train_subsets_sin_held_out_base_model":
+        run_train_subsets_sin_held_out_base_model()
 
     else:
         raise ValueError("Experiment not in this file")

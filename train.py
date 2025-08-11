@@ -545,7 +545,7 @@ def load_prev_training(model_path, model_file):
 
 
 
-def train_subsets_base_model(model_path, model_file, hp=None):
+def train_subsets_base_model(model_path, model_file, hp=None, env_dict=None):
 
     # create model path for saving model and hp
     create_dir(model_path)
@@ -582,30 +582,26 @@ def train_subsets_base_model(model_path, model_file, hp=None):
     optimizer = torch.optim.Adam(policy.parameters(), lr=hp["lr"])
 
     losses = []
+    test_losses = []
     interval = 100
     best_test_loss = np.inf
 
-    env_dict = {
-        "DlyHalfReach": DlyHalfReach, 
-        "DlyHalfCircleClk": DlyHalfCircleClk, 
-        "DlySinusoid": DlySinusoid, 
-        "DlySinusoidInv": DlySinusoidInv, 
-        "DlyFullReach": DlyFullReach,
-        "DlyFullCircleClk": DlyFullCircleClk,
-        "DlyFigure8": DlyFigure8,
-        "DlyFigure8Inv": DlyFigure8Inv
-    }
-
-    env_list = [
-        DlyHalfReach, 
-        DlyHalfCircleClk, 
-        DlySinusoid, 
-        DlySinusoidInv, 
-        DlyFullReach,
-        DlyFullCircleClk,
-        DlyFigure8,
-        DlyFigure8Inv
-    ]
+    if env_dict == None:
+        env_dict = {
+            "DlyHalfReach": DlyHalfReach, 
+            "DlyHalfCircleClk": DlyHalfCircleClk, 
+            "DlySinusoid": DlySinusoid, 
+            "DlySinusoidInv": DlySinusoidInv, 
+            "DlyFullReach": DlyFullReach,
+            "DlyFullCircleClk": DlyFullCircleClk,
+            "DlyFigure8": DlyFigure8,
+            "DlyFigure8Inv": DlyFigure8Inv
+        }
+    
+    # Build an environment list
+    env_list = []
+    for env in env_dict.values():
+        env_list.append(env)
 
     probs = [1/len(env_list)] * len(env_list)
 
@@ -617,7 +613,6 @@ def train_subsets_base_model(model_path, model_file, hp=None):
 
         rand_env = random.choices(env_list, probs)
         env = rand_env[0](effector=effector)
-        epoch_bounds = env.epoch_bounds
 
         # Get first timestep
         obs, info = env.reset(options={"batch_size": hp["batch_size"]})
@@ -656,6 +651,7 @@ def train_subsets_base_model(model_path, model_file, hp=None):
         loss += l1_muscle_act(muscle_acts, hp["l1_muscle_act"])
         if hp["activation_name"] != "tanh":
             loss += simple_dynamics(hs, policy.mrnn, weight=hp["simple_dynamics_weight"])
+        losses.append(loss.item())
         
         # backward pass & update weights
         optimizer.zero_grad() 
@@ -663,15 +659,15 @@ def train_subsets_base_model(model_path, model_file, hp=None):
 
         torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=1.)  # important!
         optimizer.step()
-        losses.append(loss.item())
 
         if (batch % interval == 0) and (batch != 0):
             print("Batch {}/{} Done, mean policy loss: {}".format(batch, hp["epochs"], sum(losses[-interval:])/interval))
-            np.savetxt(os.path.join(model_path, "losses.txt"), losses)
 
         if (batch % hp["save_iter"] == 0):
             # Get test loss
             test_loss = do_eval(policy, hp, env_dict=env_dict)
+            test_losses.append(test_loss)
+            np.savetxt(os.path.join(model_path, "test_losses.txt"), test_losses)
             # If current test loss is better than previous, save model and update best loss
             if test_loss <= best_test_loss:
                 best_test_loss = test_loss
@@ -735,6 +731,7 @@ def train_subsets_held_out_base_model(
     optimizer = torch.optim.Adam(policy.parameters(), lr=hp["lr"])
 
     losses = []
+    test_losses = []
     interval = 100
     best_test_loss = np.inf
 
@@ -795,14 +792,7 @@ def train_subsets_held_out_base_model(
         tg = torch.cat(tg, axis=1)
         muscle_acts = torch.cat(muscle_acts, axis=1)
         hs = torch.cat(hs, axis=1)
-
-        if env_dict[rand_env[0]] == "DlyFigure8Inv":
-            loss = torch.sum(torch.abs(xy - tg), dim=-1)
-            loss = loss * fig8_cmask
-            loss = loss.mean()
-        else:
-            # Implement loss function
-            loss = l1_dist(xy, tg)  # L1 loss on position
+        loss = l1_dist(xy, tg)  # L1 loss on position
         
         # backward pass & update weights
         optimizer.zero_grad() 
@@ -819,6 +809,8 @@ def train_subsets_held_out_base_model(
         if (batch % hp["save_iter"] == 0):
             # Get test loss
             test_loss = do_eval(policy, hp, env_dict=env_dict)
+            test_losses.append(test_loss)
+            np.savetxt(os.path.join(save_model_path, "test_losses.txt"), test_losses)
             # If current test loss is better than previous, save model and update best loss
             if test_loss <= best_test_loss:
                 best_test_loss = test_loss

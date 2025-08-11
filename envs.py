@@ -114,6 +114,17 @@ class MotornetEnv(env.Environment):
         }
 
         return obs, reward, terminated, info
+    
+    def choose_delay(self, delay_cond, custom_delay):
+        delay_times = [25, 50, 75]
+        if delay_cond is not None:
+            delay_time = delay_times[delay_cond]
+        elif custom_delay is not None:
+            # Should be an integer
+            delay_time = custom_delay
+        else:
+            delay_time = random.choice(delay_times)
+        return delay_time
 
     def reset(self, *, testing: bool = False, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
         """
@@ -142,6 +153,7 @@ class DlyHalfReach(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -158,11 +170,7 @@ class DlyHalfReach(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
@@ -290,6 +298,7 @@ class DlyHalfCircleClk(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -306,11 +315,7 @@ class DlyHalfCircleClk(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
@@ -446,6 +451,7 @@ class DlyHalfCircleCClk(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -462,11 +468,7 @@ class DlyHalfCircleCClk(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
@@ -601,6 +603,7 @@ class DlySinusoid(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -617,11 +620,7 @@ class DlySinusoid(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
@@ -759,6 +758,7 @@ class DlySinusoidInv(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -775,11 +775,7 @@ class DlySinusoidInv(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(50, 150, 10)) if testing else [50, 100, 150]
@@ -914,6 +910,7 @@ class DlyFullReach(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -930,11 +927,7 @@ class DlyFullReach(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
@@ -1070,6 +1063,7 @@ class DlyFullCircleClk(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -1086,11 +1080,7 @@ class DlyFullCircleClk(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
@@ -1226,6 +1216,7 @@ class DlyFullCircleCClk(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -1242,11 +1233,7 @@ class DlyFullCircleCClk(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
@@ -1382,6 +1369,7 @@ class DlyFigure8(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -1398,11 +1386,7 @@ class DlyFigure8(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
@@ -1545,6 +1529,7 @@ class DlyFigure8Inv(MotornetEnv):
         reach_conds = options.get('reach_conds', None)
         speed_cond = options.get('speed_cond', None)
         delay_cond = options.get('delay_cond', None)
+        custom_delay = options.get('custom_delay', None)
         joint_state = th.tensor([self.effector.pos_range_bound[0] * 0.5 + self.effector.pos_upper_bound[0] + 0.1, 
                                 self.effector.pos_range_bound[1] * 0.5 + self.effector.pos_upper_bound[1] + 0.5, 0, 0
         ]).unsqueeze(0).repeat(batch_size, 1)
@@ -1561,11 +1546,7 @@ class DlyFigure8Inv(MotornetEnv):
 
         # Set up max_ep_timesteps separately for each one sampled
         # Set go cue time, randomly sample from a distribution, say (50, 75, 100)
-        delay_times = [25, 50, 75]
-        if delay_cond is None:
-            self.delay_time = random.choice(delay_times)
-        else:
-            self.delay_time = delay_times[delay_cond]
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
 
         # Set up different speeds, use same delay and movement time across batch to keep timesteps the same
         movement_times = list(np.arange(100, 300, 20)) if testing else [100, 200, 300]
