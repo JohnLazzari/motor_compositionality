@@ -20,6 +20,7 @@ from sklearn.decomposition import PCA
 from analysis.jPCA import JPCA
 from analysis.jpca_util import plot_projections
 from exp_utils import _test, env_dict
+from plt_utils import empty_2d_ax, standard_2d_ax
 
 """ The functions here are currently doing pca on each environment then plotting, this may change
 """
@@ -52,7 +53,7 @@ def _get_pcs(model_name, epoch, env, system, batch_size=8, speed_cond=5):
     if epoch == "delay":
         env_h = trial_data[mode][:, trial_data["epoch_bounds"]["delay"][0]:trial_data["epoch_bounds"]["delay"][1]]
     elif epoch == "movement":
-        env_h = trial_data[mode][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
+        env_h = trial_data[mode][:, trial_data["epoch_bounds"]["movement"][0]+25:trial_data["epoch_bounds"]["movement"][1]]
     else:
         raise ValueError("not valid epoch")
 
@@ -94,8 +95,8 @@ def _plot_pca3d(model_name, epoch, system):
             ax.plot(h_proj[:, 0], h_proj[:, 1], min_z, color="grey", linewidth=2, alpha=0.5)
 
             # Start and end points (start is triangle, end is x)
-            ax.scatter(h_proj[0, 0], h_proj[0, 1], h_proj[0, 2], marker="^", color=colors[i], s=250, zorder=10)
-            ax.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], marker="X", color=colors[i], s=250, zorder=10)
+            ax.scatter(h_proj[0, 0], h_proj[0, 1], h_proj[0, 2], marker="^", color=colors[i], s=200, zorder=10)
+            ax.scatter(h_proj[-1, 0], h_proj[-1, 1], h_proj[-1, 2], marker="X", color=colors[i], s=200, zorder=10)
         
         # No grid
         ax.grid(False)

@@ -31,6 +31,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 import matplotlib.patches as mpatches
 from exp_utils import _test, env_dict, split_movement_epoch, get_interpolation_input, pvalues, get_middle_movement, composite_input_optimization
 from exp_utils import distances_from_combinations, angles_from_combinations, shapes_from_combinations, convert_motif_dict_to_list, test_sequential_inputs
+from exp_utils import convert_motif_dict_to_list
 from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
 from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -40,6 +41,7 @@ from DSA import DSA
 import scipy
 from utils import interpolate_trial
 import pandas as pd
+from sklearn.model_selection import train_test_split
 from plt_utils import standard_2d_ax, ax_3d_no_grid, empty_3d, no_ticks_2d_ax, empty_2d_ax
 
 plt.rcParams.update({'font.size': 18})  # Sets default font size for all text
@@ -1009,7 +1011,7 @@ def _plot_bar(combinations, metric, exp_path, metric_name, combination_labels, c
     combination_stds = []
     combination_data = {}
     for l, combination in enumerate(combinations):
-        task_metric = _convert_motif_dict_to_list(combination, metric)
+        task_metric = convert_motif_dict_to_list(combination, metric)
 
         """
             This is for finding examples for two_task_pcs. Find task pairs with large disparities, etc.
@@ -1060,8 +1062,8 @@ def _plot_scatter(all_combinations, combinations, combination_colors, metric1, m
 
     fig, ax = standard_2d_ax()
 
-    task_metric1 = _convert_motif_dict_to_list(all_combinations, metric1)
-    task_metric2 = _convert_motif_dict_to_list(all_combinations, metric2)
+    task_metric1 = convert_motif_dict_to_list(all_combinations, metric1)
+    task_metric2 = convert_motif_dict_to_list(all_combinations, metric2)
 
     metric1_list = np.array(task_metric1).reshape((-1, 1))
     metric2_list = np.array(task_metric2).reshape((-1, 1))
@@ -1073,8 +1075,8 @@ def _plot_scatter(all_combinations, combinations, combination_colors, metric1, m
     ax.plot(x, regression.coef_ * x + regression.intercept_, color="black")
 
     for c, combination in enumerate(combinations[:-1]):
-        task_metric1_comb = _convert_motif_dict_to_list(combination, metric1)
-        task_metric2_comb = _convert_motif_dict_to_list(combination, metric2)
+        task_metric1_comb = convert_motif_dict_to_list(combination, metric1)
+        task_metric2_comb = convert_motif_dict_to_list(combination, metric2)
         ax.scatter(task_metric1_comb, task_metric2_comb, s=100, alpha=0.25, color=combination_colors[c])
     save_fig(os.path.join(exp_path, "movement", f"{metric1_name} vs {metric2_name}"), eps=True)
 
@@ -1168,8 +1170,8 @@ def _trajectory_alignment(model_name):
     # -------------------------------------- NEURAL AND MUSCLE SHAPE DISTRIBUTIONS
 
     fig, ax = standard_2d_ax()
-    all_shapes_h = _convert_motif_dict_to_list(combination_labels, shapes_h)
-    all_shapes_muscle = _convert_motif_dict_to_list(combination_labels, shapes_muscle)
+    all_shapes_h = convert_motif_dict_to_list(combination_labels, shapes_h)
+    all_shapes_muscle = convert_motif_dict_to_list(combination_labels, shapes_muscle)
 
     bins = np.linspace(0, 1, 15)
     weights_data_h = np.ones_like(all_shapes_h) / len(all_shapes_h)
@@ -1184,8 +1186,8 @@ def _trajectory_alignment(model_name):
     # ------------------------------------------------------------- ANGLE DISTRIBUTIONS
 
     fig, ax = standard_2d_ax()
-    angle_h_dist = _convert_motif_dict_to_list(combination_labels, angles_h)
-    angle_muscle_dist = _convert_motif_dict_to_list(combination_labels, angles_muscle)
+    angle_h_dist = convert_motif_dict_to_list(combination_labels, angles_h)
+    angle_muscle_dist = convert_motif_dict_to_list(combination_labels, angles_muscle)
 
     bins = np.linspace(0, 1.5, 15)
     weights_data_h = np.ones_like(angle_h_dist) / len(angle_h_dist)
@@ -1196,6 +1198,42 @@ def _trajectory_alignment(model_name):
     plt.axvline(sum(angle_muscle_dist)/len(angle_muscle_dist), color="purple", linestyle="dashed", linewidth=2)
     plt.xlim([0, 1.5])
     save_fig(os.path.join(exp_path, "movement", "neural_muscle_angle_dists"), eps=True)
+
+    # ------------------------------------------------------------- SVM DECODING
+
+    metric_scores = {}
+    for metric_label, metric in all_metrics.items():
+        # Get the data for subsets into list
+        subset_vals = np.array(convert_motif_dict_to_list(subset_tasks, metric))
+        extension_vals = np.array(convert_motif_dict_to_list(extension_tasks, metric))
+        retraction_vals = np.array(convert_motif_dict_to_list(retraction_tasks, metric))
+        extension_retraction_vals = np.array(convert_motif_dict_to_list(extension_retraction_tasks, metric))
+
+        # labels for each category
+        subset_labels = 0*np.ones((subset_vals.shape[0], 1))
+        extension_labels = 1*np.ones((extension_vals.shape[0], 1))
+        retraction_labels = 2*np.ones((retraction_vals.shape[0], 1))
+        extension_retraction_labels = 3*np.ones((extension_retraction_vals.shape[0], 1))
+
+        X = np.concatenate([subset_vals, extension_vals, retraction_vals, extension_retraction_vals])
+        X = np.expand_dims(X, axis=1)
+        y = np.concatenate([subset_labels, extension_labels, retraction_labels, extension_retraction_labels])
+
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+        svm = sklearn.svm.SVC(kernel="linear")
+        svm.fit(X_train, y_train)
+        score = svm.score(X_test, y_test)
+        metric_scores[metric_label] = score
+    
+    x_labels = [1, 2]
+    fig, ax = standard_2d_ax()
+    ax.plot(x_labels, [metric_scores["neural_angles"], metric_scores["neural_shapes"]], linewidth=4, color="black")
+    ax.scatter(x_labels, [metric_scores["neural_angles"], metric_scores["neural_shapes"]], s=250, color="blue", zorder=10)
+    ax.plot(x_labels, [metric_scores["muscle_angles"], metric_scores["muscle_shapes"]], linewidth=4, color="black")
+    ax.scatter(x_labels, [metric_scores["muscle_angles"], metric_scores["muscle_shapes"]], s=250, color="purple", zorder=10)
+    ax.set_xticks([0, 1, 2, 3], [" ", "Angular \n Distance", "Disparity", " "])
+    save_fig(os.path.join(exp_path, "decoding"), eps=True)
 
     # -------------------------------------- SCATTER PLOTS
 
@@ -1704,8 +1742,10 @@ def composite_input_init(model_name):
     trial_data = load_pickle(load_name)
     colors_envs = plt.cm.tab10(np.linspace(0, 1, len(env_dict))) 
 
-    epoch_pca, env_hs, _ = _get_pcs(model_name, "delay", "extension", delay_cond=2, batch_size=32, n_components=3)
+    env_hs, _ = _get_mean_act(model_name, "delay", "extension", delay_cond=2, batch_size=32)
     env_hs = np.concatenate(env_hs)
+    epoch_pca = PCA(n_components=3)
+    epoch_pca.fit(env_hs)
 
     fig, ax = ax_3d_no_grid()
     for e, env in enumerate(env_dict_ext):
@@ -1720,13 +1760,13 @@ def composite_input_init(model_name):
         reduced_baseline = epoch_pca.transform(env_hs)
 
         ax.scatter(reduced_baseline[e, 0], reduced_baseline[e, 1], reduced_baseline[e, 2], s=200, marker="o", color=colors_envs[e])
-        ax.scatter(reduced_baseline[e, 0], reduced_baseline[e, 1], min_val, s=200, marker="o", color=colors_envs[e], alpha=0.15)
+        ax.scatter(reduced_baseline[e, 0], reduced_baseline[e, 1], min_val, s=200, marker="o", color=colors_envs[e], alpha=0.10)
 
         reduced_composite = epoch_pca.transform(composite_h)
-        ax.plot(reduced_composite[:, 0], reduced_composite[:, 1], reduced_composite[:, 2], linewidth=4, color=colors_envs[e], alpha=0.5)
-        ax.plot(reduced_composite[:, 0], reduced_composite[:, 1], min_val, linewidth=4, color=colors_envs[e], alpha=0.15)
-        ax.scatter(reduced_composite[0, 0], reduced_composite[0, 1], reduced_composite[0, 2], s=100, marker="^", color=colors_envs[e])
-        ax.scatter(reduced_composite[-1, 0], reduced_composite[-1, 1], reduced_composite[-1, 2], s=100, marker="x", color=colors_envs[e])
+        #ax.plot(reduced_composite[:, 0], reduced_composite[:, 1], reduced_composite[:, 2], linewidth=4, color=colors_envs[e], alpha=0.5)
+        ax.scatter(reduced_composite[-1, 0], reduced_composite[-1, 1], min_val, s=200,  marker="X", color=colors_envs[e], alpha=0.10)
+        #ax.scatter(reduced_composite[0, 0], reduced_composite[0, 1], reduced_composite[0, 2], s=100, marker="^", color=colors_envs[e])
+        ax.scatter(reduced_composite[-1, 0], reduced_composite[-1, 1], reduced_composite[-1, 2], s=200, marker="X", color=colors_envs[e])
 
     save_fig(os.path.join(exp_path, f"extension_init_all"), eps=True)
 
