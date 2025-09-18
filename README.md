@@ -31,7 +31,7 @@ The project provides:
 - `checkpoints/`, `results/`, `logs/`: Output directories (created as needed).
 
 ## Installation
-Prereqs: Python 3.9+, PyTorch, NumPy. For training only, you mainly need motornet and plotting deps. For full analyses, install extra scientific packages.
+Prereqs: Python 3.9+, PyTorch 2.6.0, NumPy 2.2.4, scikit-learn 1.6.1. For training only, you mainly need motornet 0.2.0 and plotting deps (matplotlib 3.10.1). For full analyses, install extra scientific packages.
 
 1) Create an environment and install core deps
 - `pip install torch numpy matplotlib tqdm configargparse`
@@ -43,6 +43,7 @@ Prereqs: Python 3.9+, PyTorch, NumPy. For training only, you mainly need motorne
   - `tensor_maximum_entropy` (see its repo for install)
   - `dPCA` (Machens lab implementation or equivalent)
 
+Typical install time for all packages should take less than a minute.
 Note: `mRNNTorch` ships in this repo; no separate install required.
 
 ## Quick Start
@@ -58,7 +59,7 @@ Run a transfer (held‑out) training variant (fine‑tunes only new rule inputs)
 Train on a compositional environment with saved loss curves:
 - `python experiments/run_train.py --experiment run_train_compositional_env_base_model`
 
-SLURM example templates are provided in `job.sh` and `job_interp_fp.sh` and use `config.txt` for arguments.
+Typical training of a network on all environments takes roughly 24 hours on a CPU. Expected output for training should be the training loss (printed every 100 iterations) and validation loss (calculated on all environments every 500 iterations).
 
 ## Configuration
 Many experiment runners accept a config file via `--config` (see `config.py`):
@@ -99,7 +100,7 @@ Lower‑level evaluation helper (single rollout):
 - `from experiments.exp_utils import _test, env_dict`
 - `trial = _test("checkpoints/rnn256_softplus_sd1e-3_ma1e-2", "rnn256_softplus_sd1e-3_ma1e-2.pth", {"batch_size": 8, "reach_conds": np.arange(0,32,4), "speed_cond": 5, "delay_cond": 1}, env=env_dict["DlyHalfReach"])`
 
-Principal angles and VAF ratio helpers live in `analysis/manifold.py`.
+Principal angles and VAF ratio helpers live in `analysis/manifold.py`. All experiments will be saved to a folder in the users project directory.
 
 ## Tips and Common Patterns
 - Hidden size and activation: set via `hp` dict in the chosen runner or by editing `train.DEF_HP`.
