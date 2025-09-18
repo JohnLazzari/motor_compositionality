@@ -1,8 +1,10 @@
-# motor_compositionality
+# Multitasking Recurrent Networks Utilize Compositional Strategies for Control of Movement
 
-...
+![My Image](images/training_fig.png)
 
 RNNs and GRUs trained to perform multiple delayed‐reach/movement tasks with biomechanical feedback, and analyses of how neural and muscular manifolds compose across tasks. Environments are built on top of motornet’s 2‑link, 6‑muscle arm, and networks are implemented with a modular multi‑region RNN (mRNNTorch).
+
+Link to Biorxiv: https://www.biorxiv.org/content/10.1101/2025.09.10.675375v1
 
 The project provides:
 - Training scripts for multi‑task models and transfer/compositional variants
