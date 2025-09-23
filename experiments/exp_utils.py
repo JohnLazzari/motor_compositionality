@@ -479,12 +479,10 @@ def test_sequential_inputs(
                 obs = _replace_rule_input(extension_rule_input, obs)
             
             if timesteps == middle_movement:
-                for t in range(25):
-                    obs = _replace_rule_input(extension_rule_input, obs)
-                    # Check if silencing units 
+                for t in range(2):
+                    obs = _replace_rule_input(retraction_rule_input, obs)
                     x, h, _ = policy(obs, x, h, noise=noise)
 
-            # Check if silencing units 
             x, h, action = policy(obs, x, h, noise=noise)
 
             # Take step in motornet environment
