@@ -2,7 +2,7 @@
     "recurrent_regions": [
         {
             "name": "region",
-            "num_units": 512,
+            "num_units": 256,
             "base_firing": 0,
             "learnable_bias": true
         }

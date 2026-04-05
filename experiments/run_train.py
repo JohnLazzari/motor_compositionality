@@ -5,200 +5,155 @@ project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 import warnings
-warnings.filterwarnings("ignore")
 
-from train import train_2link, load_prev_training, train_compositional_env_base_model, train_subsets_base_model, train_subsets_held_out_base_model
-from envs import DlyHalfReach, DlyHalfCircleClk, DlySinusoid, DlySinusoidInv
-from envs import DlyFullReach, DlyFullCircleClk, DlyFigure8, DlyFigure8Inv
+warnings.filterwarnings("ignore")
+import pickle
+
+from modules.multitask_training import MultitaskTrainer
+from modules.envs.reach import Reach
+from modules.envs.clk_curved_reach import ClkCurvedReach
+from modules.envs.cclk_curved_reach import CClkCurvedReach
+from modules.envs.sinusoid import Sinusoid
+from modules.envs.inv_sinusoid import InvSinusoid
+from modules.envs.reach_back import ReachBack
+from modules.envs.clk_cycle import ClkCycle
+from modules.envs.cclk_cycle import CClkCycle
+from modules.envs.figure_eight import Figure8
+from modules.envs.inv_figure_eight import InvFigure8
 import config
 import tqdm as tqdm
-
-def run_train_compositional_env_base_model():
-    # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256, "epochs": 75000}
-
-    load_model_path = "checkpoints/rnn256_softplus_sd1e-3_ma1e-2"
-    load_model_file = "rnn256_softplus_sd1e-3_ma1e-2.pth"
-
-    save_model_path = "checkpoints/base_rnn_composable_env_trainloss"
-    save_model_file = "base_rnn_composable_env_trainloss.pth"
-
-    print("TRAINING BASE MODEL ON COMPOSITIONAL ENV")
-    # leave hp as default
-    train_compositional_env_base_model(
-        load_model_path, 
-        load_model_file, 
-        save_model_path, 
-        save_model_file,
-        hp=hp
-    )
 
 
 def run_train_subsets_all_base_model():
     """
-        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
-        for later transfer learning.
+    This will run training on a subset of the environments with sinusoidinv and figure8inv held out
+    for later transfer learning.
     """
+    mult_train = MultitaskTrainer()
     # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256}
     env_dict = {
-        "DlyHalfReach": DlyHalfReach, 
-        "DlyHalfCircleClk": DlyHalfCircleClk, 
-        "DlySinusoid": DlySinusoid, 
-        "DlySinusoidInv": DlySinusoidInv, 
-        "DlyFullReach": DlyFullReach,
-        "DlyFullCircleClk": DlyFullCircleClk,
-        "DlyFigure8": DlyFigure8,
-        "DlyFigure8Inv": DlyFigure8Inv
+        "Reach": Reach,
+        "ClkCurvedReach": ClkCurvedReach,
+        "Sinusoid": Sinusoid,
+        "InvSinusoid": InvSinusoid,
+        "ReachBack": ReachBack,
+        "ClkCycle": ClkCycle,
+        "Figure8": Figure8,
+        "InvFigure8": InvFigure8,
     }
 
     model_path = "checkpoints/rnn256_softplus_heldout"
     model_file = "rnn256_softplus_heldout.pth"
 
     print("TRAINING BASE MODEL ON ALL TASK SUBSETS FOR HELD OUT TESTING")
-    # leave hp as default
-    train_subsets_base_model(
-        model_path, 
-        model_file, 
-        hp=hp,
-        env_dict=env_dict
-    )
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
 
 def run_train_subsets_nocr_base_model():
     """
-        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
-        for later transfer learning.
+    This will run training on a subset of the environments with sinusoidinv and figure8inv held out
+    for later transfer learning.
     """
-    # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256}
+    mult_train = MultitaskTrainer()
     env_dict = {
-        "DlyHalfReach": DlyHalfReach, 
-        "DlySinusoid": DlySinusoid, 
-        "DlySinusoidInv": DlySinusoidInv, 
-        "DlyFullReach": DlyFullReach,
-        "DlyFigure8": DlyFigure8,
-        "DlyFigure8Inv": DlyFigure8Inv
+        "Reach": Reach,
+        "Sinusoid": Sinusoid,
+        "InvSinusoid": InvSinusoid,
+        "ReachBack": ReachBack,
+        "Figure8": Figure8,
+        "InvFigure8": InvFigure8,
     }
 
     model_path = "checkpoints/rnn256_softplus_heldout_nocr"
     model_file = "rnn256_softplus_heldout_nocr.pth"
 
     print("TRAINING BASE MODEL ON NOCR TASK SUBSETS FOR HELD OUT TESTING")
-    # leave hp as default
-    train_subsets_base_model(
-        model_path, 
-        model_file, 
-        hp=hp,
-        env_dict=env_dict
-    )
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
 
 def run_train_subsets_nosin_base_model():
     """
-        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
-        for later transfer learning.
+    This will run training on a subset of the environments with sinusoidinv and figure8inv held out
+    for later transfer learning.
     """
     # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256}
+    mult_train = MultitaskTrainer()
     env_dict = {
-        "DlyHalfReach": DlyHalfReach, 
-        "DlyHalfCircleClk": DlyHalfCircleClk, 
-        "DlyFullReach": DlyFullReach,
-        "DlyFullCircleClk": DlyFullCircleClk,
+        "Reach": Reach,
+        "ClkCurvedReach": ClkCurvedReach,
+        "ReachBack": ReachBack,
+        "ClkCycle": ClkCycle,
     }
 
     model_path = "checkpoints/rnn256_softplus_heldout_nosin"
     model_file = "rnn256_softplus_heldout_nosin.pth"
 
     print("TRAINING BASE MODEL ON NOSIN TASK SUBSETS FOR HELD OUT TESTING")
-    # leave hp as default
-    train_subsets_base_model(
-        model_path, 
-        model_file, 
-        hp=hp,
-        env_dict=env_dict
-    )
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
 
 def run_train_subsets_reach_base_model():
     """
-        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
-        for later transfer learning.
+    This will run training on a subset of the environments with sinusoidinv and figure8inv held out
+    for later transfer learning.
     """
     # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256}
-    env_dict = {
-        "DlyHalfReach": DlyHalfReach, 
-        "DlyFullReach": DlyFullReach
-    }
+    mult_train = MultitaskTrainer()
+    env_dict = {"Reach": Reach, "ReachBack": ReachBack}
 
     model_path = "checkpoints/rnn256_softplus_heldout_reach"
     model_file = "rnn256_softplus_heldout_reach.pth"
 
     print("TRAINING BASE MODEL ON REACH TASK SUBSETS FOR HELD OUT TESTING")
-    # leave hp as default
-    train_subsets_base_model(
-        model_path, 
-        model_file, 
-        hp=hp,
-        env_dict=env_dict
-    )
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
 
 def run_train_subsets_cr_base_model():
     """
-        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
-        for later transfer learning.
+    This will run training on a subset of the environments with sinusoidinv and figure8inv held out
+    for later transfer learning.
     """
     # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256}
+    mult_train = MultitaskTrainer()
     env_dict = {
-        "DlyHalfCircleClk": DlyHalfCircleClk, 
-        "DlyFullCircleClk": DlyFullCircleClk,
+        "ClkCurvedReach": ClkCurvedReach,
+        "ClkCycle": ClkCycle,
     }
 
     model_path = "checkpoints/rnn256_softplus_heldout_cr"
     model_file = "rnn256_softplus_heldout_cr.pth"
 
     print("TRAINING BASE MODEL ON CR TASK SUBSETS FOR HELD OUT TESTING")
-    # leave hp as default
-    train_subsets_base_model(
-        model_path, 
-        model_file, 
-        hp=hp,
-        env_dict=env_dict
-    )
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
 
 def run_train_subsets_sin_base_model():
     """
-        This will run training on a subset of the environments with sinusoidinv and figure8inv held out 
-        for later transfer learning.
+    This will run training on a subset of the environments with sinusoidinv and figure8inv held out
+    for later transfer learning.
     """
     # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256}
+    mult_train = MultitaskTrainer()
     env_dict = {
-        "DlySinusoid": DlySinusoid, 
-        "DlySinusoidInv": DlySinusoidInv, 
-        "DlyFigure8": DlyFigure8,
-        "DlyFigure8Inv": DlyFigure8Inv
+        "Sinusoid": Sinusoid,
+        "InvSinusoid": InvSinusoid,
+        "Figure8": Figure8,
+        "InvFigure8": InvFigure8,
     }
 
     model_path = "checkpoints/rnn256_softplus_heldout_sin"
     model_file = "rnn256_softplus_heldout_sin.pth"
 
     print("TRAINING BASE MODEL ON SIN TASK SUBSETS FOR HELD OUT TESTING")
-    # leave hp as default
-    train_subsets_base_model(
-        model_path, 
-        model_file, 
-        hp=hp,
-        env_dict=env_dict
-    )
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
 
 def run_train_subsets_held_out_base_model():
     """
-        This will run training on environments sinusoidinv and figure8inv
-        with fixed hidden and input weights except for rule inputs
+    This will run training on environments sinusoidinv and figure8inv
+    with fixed hidden and input weights except for rule inputs
     """
-    # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256, "epochs": 75000}
+    mult_train = MultitaskTrainer()
 
     load_model_path = "checkpoints/rnn256_softplus_heldout"
     load_model_file = "rnn256_softplus_heldout.pth"
@@ -206,23 +161,29 @@ def run_train_subsets_held_out_base_model():
     save_model_path = "checkpoints/rnn256_softplus_heldout_transfer"
     save_model_file = "rnn256_softplus_heldout_transfer.pth"
 
+    env_dict = {
+        "CClkCurvedReach": CClkCurvedReach,
+        "CClkCycle": CClkCycle,
+    }
+
     print("TRAINING BASE MODEL ON TASK SUBSETS WITH TRANSFER")
-    # leave hp as default
-    train_subsets_held_out_base_model(
-        load_model_path, 
-        load_model_file, 
-        save_model_path, 
-        save_model_file, 
-        hp=hp
+    mult_train.train(
+        save_model_path,
+        save_model_file,
+        env_dict=env_dict,
+        load_model=True,
+        load_model_path=load_model_path,
+        load_model_file=load_model_file,
+        transfer=True,
     )
+
 
 def run_train_subsets_nocr_held_out_base_model():
     """
-        This will run training on environments sinusoidinv and figure8inv
-        with fixed hidden and input weights except for rule inputs
+    This will run training on environments sinusoidinv and figure8inv
+    with fixed hidden and input weights except for rule inputs
     """
-    # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256, "epochs": 75000}
+    mult_train = MultitaskTrainer()
 
     load_model_path = "checkpoints/rnn256_softplus_heldout_nocr"
     load_model_file = "rnn256_softplus_heldout_nocr.pth"
@@ -230,23 +191,29 @@ def run_train_subsets_nocr_held_out_base_model():
     save_model_path = "checkpoints/rnn256_softplus_heldout_nocr_transfer"
     save_model_file = "rnn256_softplus_heldout_nocr_transfer.pth"
 
+    env_dict = {
+        "CClkCurvedReach": CClkCurvedReach,
+        "CClkCycle": CClkCycle,
+    }
+
     print("TRAINING NOCR MODEL ON TASK SUBSETS WITH TRANSFER")
-    # leave hp as default
-    train_subsets_held_out_base_model(
-        load_model_path, 
-        load_model_file, 
-        save_model_path, 
-        save_model_file, 
-        hp=hp
+    mult_train.train(
+        save_model_path,
+        save_model_file,
+        env_dict=env_dict,
+        load_model=True,
+        load_model_path=load_model_path,
+        load_model_file=load_model_file,
+        transfer=True,
     )
+
 
 def run_train_subsets_nosin_held_out_base_model():
     """
-        This will run training on environments sinusoidinv and figure8inv
-        with fixed hidden and input weights except for rule inputs
+    This will run training on environments sinusoidinv and figure8inv
+    with fixed hidden and input weights except for rule inputs
     """
-    # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256, "epochs": 75000}
+    mult_train = MultitaskTrainer()
 
     load_model_path = "checkpoints/rnn256_softplus_heldout_nosin"
     load_model_file = "rnn256_softplus_heldout_nosin.pth"
@@ -254,23 +221,29 @@ def run_train_subsets_nosin_held_out_base_model():
     save_model_path = "checkpoints/rnn256_softplus_heldout_nosin_transfer"
     save_model_file = "rnn256_softplus_heldout_nosin_transfer.pth"
 
+    env_dict = {
+        "CClkCurvedReach": CClkCurvedReach,
+        "CClkCycle": CClkCycle,
+    }
+
     print("TRAINING NOSIN MODEL ON TASK SUBSETS WITH TRANSFER")
-    # leave hp as default
-    train_subsets_held_out_base_model(
-        load_model_path, 
-        load_model_file, 
-        save_model_path, 
-        save_model_file, 
-        hp=hp
+    mult_train.train(
+        save_model_path,
+        save_model_file,
+        env_dict=env_dict,
+        load_model=True,
+        load_model_path=load_model_path,
+        load_model_file=load_model_file,
+        transfer=True,
     )
+
 
 def run_train_subsets_reach_held_out_base_model():
     """
-        This will run training on environments sinusoidinv and figure8inv
-        with fixed hidden and input weights except for rule inputs
+    This will run training on environments sinusoidinv and figure8inv
+    with fixed hidden and input weights except for rule inputs
     """
-    # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256, "epochs": 75000}
+    mult_train = MultitaskTrainer()
 
     load_model_path = "checkpoints/rnn256_softplus_heldout_reach"
     load_model_file = "rnn256_softplus_heldout_reach.pth"
@@ -278,23 +251,29 @@ def run_train_subsets_reach_held_out_base_model():
     save_model_path = "checkpoints/rnn256_softplus_heldout_reach_transfer"
     save_model_file = "rnn256_softplus_heldout_reach_transfer.pth"
 
+    env_dict = {
+        "CClkCurvedReach": CClkCurvedReach,
+        "CClkCycle": CClkCycle,
+    }
+
     print("TRAINING REACH MODEL ON TASK SUBSETS WITH TRANSFER")
-    # leave hp as default
-    train_subsets_held_out_base_model(
-        load_model_path, 
-        load_model_file, 
-        save_model_path, 
-        save_model_file, 
-        hp=hp
+    mult_train.train(
+        save_model_path,
+        save_model_file,
+        env_dict=env_dict,
+        load_model=True,
+        load_model_path=load_model_path,
+        load_model_file=load_model_file,
+        transfer=True,
     )
+
 
 def run_train_subsets_cr_held_out_base_model():
     """
-        This will run training on environments sinusoidinv and figure8inv
-        with fixed hidden and input weights except for rule inputs
+    This will run training on environments sinusoidinv and figure8inv
+    with fixed hidden and input weights except for rule inputs
     """
-    # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256, "epochs": 75000}
+    mult_train = MultitaskTrainer()
 
     load_model_path = "checkpoints/rnn256_softplus_heldout_cr"
     load_model_file = "rnn256_softplus_heldout_cr.pth"
@@ -302,23 +281,29 @@ def run_train_subsets_cr_held_out_base_model():
     save_model_path = "checkpoints/rnn256_softplus_heldout_cr_transfer"
     save_model_file = "rnn256_softplus_heldout_cr_transfer.pth"
 
+    env_dict = {
+        "CClkCurvedReach": CClkCurvedReach,
+        "CClkCycle": CClkCycle,
+    }
+
     print("TRAINING CR MODEL ON TASK SUBSETS WITH TRANSFER")
-    # leave hp as default
-    train_subsets_held_out_base_model(
-        load_model_path, 
-        load_model_file, 
-        save_model_path, 
-        save_model_file, 
-        hp=hp
+    mult_train.train(
+        save_model_path,
+        save_model_file,
+        env_dict=env_dict,
+        load_model=True,
+        load_model_path=load_model_path,
+        load_model_file=load_model_file,
+        transfer=True,
     )
+
 
 def run_train_subsets_sin_held_out_base_model():
     """
-        This will run training on environments sinusoidinv and figure8inv
-        with fixed hidden and input weights except for rule inputs
+    This will run training on environments sinusoidinv and figure8inv
+    with fixed hidden and input weights except for rule inputs
     """
-    # Use input size for original network, will manually change it using add_new_rule_inputs
-    hp = {"hid_size": 256, "epochs": 75000}
+    mult_train = MultitaskTrainer()
 
     load_model_path = "checkpoints/rnn256_softplus_heldout_sin"
     load_model_file = "rnn256_softplus_heldout_sin.pth"
@@ -326,153 +311,158 @@ def run_train_subsets_sin_held_out_base_model():
     save_model_path = "checkpoints/rnn256_softplus_heldout_sin_transfer"
     save_model_file = "rnn256_softplus_heldout_sin_transfer.pth"
 
+    env_dict = {
+        "CClkCurvedReach": CClkCurvedReach,
+        "CClkCycle": CClkCycle,
+    }
+
     print("TRAINING SIN MODEL ON TASK SUBSETS WITH TRANSFER")
-    # leave hp as default
-    train_subsets_held_out_base_model(
-        load_model_path, 
-        load_model_file, 
-        save_model_path, 
-        save_model_file, 
-        hp=hp
+    mult_train.train(
+        save_model_path,
+        save_model_file,
+        env_dict=env_dict,
+        load_model=True,
+        load_model_path=load_model_path,
+        load_model_file=load_model_file,
+        transfer=True,
     )
 
+
 def train_rnn128_softplus():
-    hp = {"hid_size": 128}
+    mult_train = MultitaskTrainer(hid_size=128)
     model_path = "checkpoints/rnn128_softplus"
     model_file = "rnn128_softplus.pth"
     print("TRAINING RNN WITH SOFTPLUS AND 128 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn256_softplus():
-    hp = {"hid_size": 256}
-    model_path = "checkpoints/rnn256_softplus_sd1e-3_ma1e-2"
-    model_file = "rnn256_softplus_sd1e-3_ma1e-2.pth"
+    mult_train = MultitaskTrainer()
+    model_path = "checkpoints/rnn256_softplus"
+    model_file = "rnn256_softplus.pth"
     print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn256_softplus_noreg():
-    hp = {
-        "hid_size": 256, 
-        "l1_rate": 0, 
-        "l1_weight": 0,
-        "l1_muscle_act": 0,
-        "simple_dynamics_weight": 0
-    }
+    mult_train = MultitaskTrainer(
+        l1_rate=0, l1_weight=0, l1_muscle_act=0, simple_dynamics_weight=0
+    )
     model_path = "checkpoints/rnn256_softplus_noreg"
     model_file = "rnn256_softplus_noreg.pth"
     print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS NO REG")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn512_softplus():
+    mult_train = MultitaskTrainer(hid_size=512)
     model_path = "checkpoints/rnn512_softplus"
     model_file = "rnn512_softplus.pth"
     print("TRAINING RNN WITH SOFTPLUS AND 512 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn128_relu():
-    hp = {"hid_size": 128, "activation_name": "relu"}
+    mult_train = MultitaskTrainer(hid_size=128, activation_name="relu")
     model_path = "checkpoints/rnn128_relu"
     model_file = "rnn128_relu.pth"
     print("TRAINING RNN WITH RELU AND 128 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn256_relu():
-    hp = {"hid_size": 256, "activation_name": "relu"}
+    mult_train = MultitaskTrainer(activation_name="relu")
     model_path = "checkpoints/rnn256_relu"
     model_file = "rnn256_relu.pth"
     print("TRAINING RNN WITH RELU AND 256 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn512_relu():
-    hp = {"activation_name": "relu"}
+    mult_train = MultitaskTrainer(hid_size=512, activation_name="relu")
     model_path = "checkpoints/rnn512_relu"
     model_file = "rnn512_relu.pth"
     print("TRAINING RNN WITH RELU AND 512 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn128_tanh():
-    hp = {"hid_size": 128, "activation_name": "tanh"}
+    mult_train = MultitaskTrainer(hid_size=128, activation_name="tanh")
     model_path = "checkpoints/rnn128_tanh"
     model_file = "rnn128_tanh.pth"
     print("TRAINING RNN WITH TANH AND 128 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn256_tanh():
-    hp = {"hid_size": 256, "activation_name": "tanh"}
+    mult_train = MultitaskTrainer(activation_name="tanh")
     model_path = "checkpoints/rnn256_tanh"
     model_file = "rnn256_tanh.pth"
     print("TRAINING RNN WITH TANH AND 256 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn256_tanh_noreg():
-    hp = {
-        "hid_size": 256, 
-        "activation_name": "tanh",
-        "l1_rate": 0, 
-        "l1_weight": 0,
-        "l1_muscle_act": 0,
-        "simple_dynamics_weight": 0
-    }
+    mult_train = MultitaskTrainer(
+        activation_name="tanh",
+        l1_rate=0,
+        l1_weight=0,
+        l1_muscle_act=0,
+        simple_dynamics_weight=0,
+    )
     model_path = "checkpoints/rnn256_tanh_noreg"
     model_file = "rnn256_tanh_noreg.pth"
     print("TRAINING RNN WITH TANH AND 256 UNITS NO REG")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_rnn512_tanh():
-    hp = {"activation_name": "tanh"}
+    mult_train = MultitaskTrainer(hid_size=512, activation_name="tanh")
     model_path = "checkpoints/rnn512_tanh"
     model_file = "rnn512_tanh.pth"
     print("TRAINING RNN WITH TANH AND 512 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
+
+def train_gru128():
+    mult_train = MultitaskTrainer(network="gru", hid_size=128)
+    model_path = "checkpoints/gru128"
+    model_file = "gru128.pth"
+    print("TRAINING GRU WITH 128 UNITS")
+    mult_train.train(model_path, model_file)
+
 
 def train_gru512():
-    hp = {"network": "gru"}
+    mult_train = MultitaskTrainer(network="gru", hid_size=512)
     model_path = "checkpoints/gru512"
     model_file = "gru512.pth"
     print("TRAINING GRU WITH 512 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
+
 
 def train_gru256():
-    hp = {"hid_size": 256, "network": "gru"}
+    mult_train = MultitaskTrainer(network="gru")
     model_path = "checkpoints/gru256"
     model_file = "gru256.pth"
     print("TRAINING GRU WITH 256 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
+    mult_train.train(model_path, model_file)
 
-def train_gru1024():
-    hp = {"hid_size": 1024, "network": "gru"}
-    model_path = "checkpoints/gru1024"
-    model_file = "gru1024.pth"
-    print("TRAINING GRU WITH 1024 UNITS")
-    # leave hp as default
-    train_2link(model_path, model_file, hp=hp)
 
 def continue_training(model_name):
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
-    load_prev_training(model_path, model_file)
 
+    with open(f"{model_name}_mult_train.pkl", "rb") as inp:
+        mult_train = pickle.load(inp)
+
+    mult_train.train(model_path, model_file, load_model=True, load_optim=True)
 
 
 if __name__ == "__main__":
-
     ### PARAMETERS ###
     parser = config.config_parser()
     args = parser.parse_args()
-    
+
     if args.experiment == "train_rnn256_softplus":
         train_rnn256_softplus()
     elif args.experiment == "train_rnn256_softplus_noreg":
@@ -503,8 +493,6 @@ if __name__ == "__main__":
         train_gru128()
     elif args.experiment == "continue_training":
         continue_training(args.model_name)
-    elif args.experiment == "run_train_compositional_env_base_model":
-        run_train_compositional_env_base_model()
 
     elif args.experiment == "run_train_subsets_all_base_model":
         run_train_subsets_all_base_model()
