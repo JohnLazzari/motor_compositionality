@@ -16,7 +16,8 @@ from modules.envs.clk_cycle import ClkCycle
 from modules.envs.cclk_cycle import CClkCycle
 from modules.envs.figure_eight import Figure8
 from modules.envs.inv_figure_eight import InvFigure8
-from utils.plt_utils import create_dir
+from utils.plot_utils import create_dir
+from utils.exp_utils import save_pickle
 
 DEF_HP = {
     "network": "rnn",
@@ -110,10 +111,7 @@ class MultitaskTrainer:
         # create model path for saving model and hp
         create_dir(model_path)
 
-        # save hyperparameters
-        with open(f"{model_path}_mult_train.pkl", "wb") as outp:
-            pickle.dump(self, outp, pickle.HIGHEST_PROTOCOL)
-
+        save_pickle(f"{model_path}/mult_train.pkl", self)
         device = torch.device("cpu")
         effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
 
@@ -164,9 +162,15 @@ class MultitaskTrainer:
 
         if env_dict is None:
             env_dict = self.full_env_dict
-        env_list = [env for env in env_dict.values()]
+        env_list = [env for env in env_dict.keys()]
 
-        losses = []
+        # initialize loss lists
+        env_losses = self._empty_loss_dict()
+        total_losses = []
+
+        env_test_losses = self._empty_loss_dict()
+        total_test_losses = []
+
         interval = 100
         best_test_loss = np.inf
 
@@ -177,8 +181,8 @@ class MultitaskTrainer:
             x = torch.zeros(size=(self.batch_size, self.hid_size))
             h = torch.zeros(size=(self.batch_size, self.hid_size))
 
-            rand_env = random.choices(env_list, probs)
-            env = rand_env[0](effector=effector)
+            env_name = random.choices(env_list, probs)[0]
+            env = env_dict[env_name](effector=effector)
 
             # Get first timestep
             obs, info = env.reset(options={"batch_size": self.batch_size})
@@ -231,19 +235,37 @@ class MultitaskTrainer:
                 policy.parameters(), max_norm=1.0
             )  # important!
             optimizer.step()
-            losses.append(loss.item())
+
+            # add losses for individual envs
+            env_losses[env_name].append(loss.item())
+            total_losses.append(loss.item())
 
             if (batch % interval == 0) and (batch != 0):
                 print(
                     "Batch {}/{} Done, mean policy loss: {}".format(
-                        batch, self.epochs, sum(losses[-interval:]) / interval
+                        batch, self.epochs, sum(total_losses[-interval:]) / interval
                     )
                 )
-                np.savetxt(os.path.join(model_path, "losses.txt"), losses)
+
+                # separately saving the total losses as well as the env losses
+                save_pickle(os.path.join(model_path, "env_losses.pkl"), env_losses)
+                np.savetxt(os.path.join(model_path, "total_losses.txt"), total_losses)
 
             if batch % self.save_iter == 0:
                 # Get test loss
-                test_loss = self.eval(policy)
+                test_loss_envs, test_loss = self.eval(policy)
+
+                self._update_loss_dict(test_loss_envs, env_test_losses)
+                total_test_losses.append(test_loss)
+
+                # separately saving the validation total losses as well as the env losses
+                save_pickle(
+                    os.path.join(model_path, "val_env_losses.pkl"), env_test_losses
+                )
+                np.savetxt(
+                    os.path.join(model_path, "val_total_losses.txt"), total_test_losses
+                )
+
                 # If current test loss is better than previous, save model and update best loss
                 if test_loss <= best_test_loss:
                     best_test_loss = test_loss
@@ -268,7 +290,8 @@ class MultitaskTrainer:
         speed_conds = list(np.arange(0, 10))
 
         total_test_loss = 0
-        condition_losses = {}
+        condition_losses = self._empty_loss_dict()
+
         for env in env_dict:
             condition_loss = 0
             for speed in speed_conds:
@@ -314,18 +337,20 @@ class MultitaskTrainer:
                 loss = self.l1_dist(xy, tg)  # L1 loss on position
                 condition_loss += loss.item()
             condition_loss /= len(speed_conds)
-            condition_losses[env] = condition_loss
+            condition_losses[env].append(condition_loss)
             total_test_loss += condition_loss
         total_test_loss /= len(env_dict)
 
         print("\n")
         print("Eval Results:")
         for env in condition_losses:
-            print(f"Total Loss for Environment {env}| {condition_losses[env]}")
+            print(f"Total Loss for Environment {env}| {condition_losses[env][0]}")
         print(f"Total Testing Loss: {total_test_loss}")
         print("\n")
 
-        return total_test_loss
+        print("Validation losses saved!")
+
+        return condition_losses, total_test_loss
 
     @staticmethod
     def l1_dist(x, y):
@@ -369,3 +394,15 @@ class MultitaskTrainer:
         update = weight * torch.norm(update)
 
         return update
+
+    def _empty_loss_dict(self):
+        # initialize loss lists
+        env_losses = {}
+        for env in self.full_env_dict:
+            env_losses[env] = []
+        return env_losses
+
+    def _update_loss_dict(self, new_dict, old_dict):
+        for key in new_dict.keys():
+            assert key in old_dict
+            old_dict[key].extend(new_dict[key])

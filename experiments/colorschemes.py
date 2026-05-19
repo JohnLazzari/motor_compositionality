@@ -4,42 +4,27 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
-from utils import load_hp, interpolate_trial
-
 import warnings
+
 warnings.filterwarnings("ignore")
 
-import motornet as mn
-from model import RNNPolicy, GRUPolicy
-import torch
 import os
-from utils import load_hp, create_dir, save_fig, load_pickle
 import matplotlib.pyplot as plt
 import numpy as np
-import config
-import pickle
-from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
-import analysis.plot_utils as plot_utils
 import tqdm as tqdm
-from sklearn.decomposition import PCA
-import matplotlib.patches as mpatches
-from exp_utils import _test, env_dict
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import itertools
-import seaborn as sns
-import scipy
-from utils import interpolate_trial
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
+from utils.plot_utils import save_fig
+
 
 def directions():
     exp_path = "results/colorschemes"
 
-    colors = plt.cm.inferno(np.linspace(0, 1, 8)) 
+    colors = plt.cm.inferno(np.linspace(0, 1, 8))
 
     # Set up figure
     fig, ax = plt.subplots()
-    ax.set_aspect('equal')
+    ax.set_aspect("equal")
 
     # Draw 8 lines at 45° intervals (0 to 360°)
     for i in range(8):
@@ -52,33 +37,32 @@ def directions():
     ax.set_xlim(-1.1, 1.1)
     ax.set_ylim(-1.1, 1.1)
     ax.grid(False)
-    ax.axis('off')  # removes ticks, labels, and spines
+    ax.axis("off")  # removes ticks, labels, and spines
     save_fig(os.path.join(exp_path, "direction"), eps=True)
-    
+
 
 def speeds():
-
     exp_path = "results/colorschemes"
 
-    colors = plt.cm.plasma(np.linspace(0, 1, 5)) 
+    colors = plt.cm.plasma(np.linspace(0, 1, 5))
 
     # Set up figure
     fig, ax = plt.subplots()
-    ax.set_aspect('equal')
+    ax.set_aspect("equal")
 
     # Draw 10 horizontal lines at y = 0.1, 0.2, ..., 1.0
     for i in range(5):
         y = 0.1 * (i + 1)
-        ax.plot([0, 1], [y, y], linewidth=6, color=colors[4-i], alpha=0.75)
+        ax.plot([0, 1], [y, y], linewidth=6, color=colors[4 - i], alpha=0.75)
 
     # Set limits and grid
     ax.grid(False)
-    ax.axis('off')  # removes ticks, labels, and spines
+    ax.axis("off")  # removes ticks, labels, and spines
 
     save_fig(os.path.join(exp_path, "speed"), eps=True)
 
-def interpolation():
 
+def interpolation():
     exp_path = "results/colorschemes"
 
     # Create figure
@@ -89,7 +73,7 @@ def interpolation():
 
     # Create a ScalarMappable for the colorbar
     norm = Normalize(vmin=0, vmax=1)
-    sm = ScalarMappable(norm=norm, cmap='magma')
+    sm = ScalarMappable(norm=norm, cmap="magma")
     sm.set_array([])
 
     # Create colorbar on specified axis
@@ -101,7 +85,9 @@ def interpolation():
 
     save_fig(os.path.join(exp_path, "interpolation"), eps=True)
 
+
 if __name__ == "__main__":
     directions()
     speeds()
     interpolation()
+

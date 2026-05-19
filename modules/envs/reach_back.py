@@ -151,9 +151,11 @@ class ReachBack(MotornetEnv):
             point_idx = th.randint(0, points.size(0), (batch_size,))
         else:
             if isinstance(reach_conds, (int, float)):
-                point_idx = torch.tensor([reach_conds])
+                point_idx = th.tensor([reach_conds])
             elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
                 point_idx = reach_conds
+            else:
+                raise TypeError
 
         goal = points[point_idx] * 0.25 + fingertip
 

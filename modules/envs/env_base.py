@@ -2,7 +2,6 @@ import torch as th
 import numpy as np
 from typing import Any
 from motornet import environment as env
-from itertools import product
 import random
 
 

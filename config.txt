@@ -1,2 +1,2 @@
-model_name=rnn256_softplus_sd1e-3_ma1e-2
-experiment=train_rnn256_softplus
+model_name=rnn256_softplus
+experiment=neural_vaf_ratio_task_cond

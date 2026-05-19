@@ -152,7 +152,7 @@ class CClkCurvedReach(MotornetEnv):
             point_idx = th.randint(0, rot_angle.size(0), (batch_size,))
         else:
             if isinstance(reach_conds, (int, float)):
-                point_idx = torch.tensor([reach_conds])
+                point_idx = th.tensor([reach_conds])
             elif isinstance(reach_conds, (th.Tensor, np.ndarray)):
                 point_idx = reach_conds
 

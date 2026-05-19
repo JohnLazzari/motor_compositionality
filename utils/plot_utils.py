@@ -1,19 +1,87 @@
-'''
-plot_utils.py
-Supports FixedPointFinder
-Written for Python 3.8.17
-@ Matt Golub, October 2018
-Please direct correspondence to mgolub@cs.washington.edu
-'''
-
 import numpy as np
-import pdb
 
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import sys
+import os
+from pathlib import Path
 
-def plot_fps(fps,
+project_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(project_root))
+
+import warnings
+
+warnings.filterwarnings("ignore")
+
+import matplotlib.pyplot as plt
+from matplotlib import rcParams
+
+
+def create_dir(save_path):
+    # Check if the directory exists, and create it if it doesn't
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+
+def save_fig(save_path, eps=False):
+    # Tell matplotlib to embed fonts as text, not outlines
+    rcParams["pdf.fonttype"] = 42  # 42 = TrueType (editable in Illustrator)
+    rcParams["ps.fonttype"] = 42
+    # Simple function to save figure while creating dir and closing
+    dir = os.path.dirname(save_path)
+    create_dir(dir)
+    plt.tight_layout()
+    if eps:
+        plt.savefig(save_path + ".pdf", format="pdf")
+    else:
+        plt.savefig(save_path + ".png")
+    plt.close()
+
+
+def standard_2d_ax(w=4, h=4):
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(w, h))
+    ax = fig.add_subplot(111)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    return fig, ax
+
+
+def no_ticks_2d_ax():
+    fig, ax = standard_2d_ax()
+    ax.set_xticks([])
+    ax.set_yticks([])
+    return fig, ax
+
+
+def empty_2d_ax():
+    fig, ax = standard_2d_ax()
+    ax.set_axis_off()  # hides axes, ticks, labels, etc.
+    return fig, ax
+
+
+def ax_3d_no_grid():
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.grid(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    return fig, ax
+
+
+def empty_3d():
+    # Create figure and 3D axes
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_axis_off()  # hides axes, ticks, labels, etc.
+    return fig, ax
+
+
+def plot_fps(
+    fps,
     dims=2,
     pca_traj=None,
     state_traj=None,
@@ -24,9 +92,9 @@ def plot_fps(fps,
     traj_color="black",
     stable_color="black",
     marker="o",
-    fig=None):
-
-    '''Plots a visualization and analysis of the unique fixed points.
+    fig=None,
+):
+    """Plots a visualization and analysis of the unique fixed points.
 
     1) Finds a low-dimensional subspace for visualization via PCA. If
     state_traj is provided, PCA is fit to [all of] those RNN state
@@ -75,17 +143,15 @@ def plot_fps(fps,
 
     Returns:
         None.
-    '''
+    """
 
-    FONT_WEIGHT = 'bold'
+    FONT_WEIGHT = "bold"
     if fig is None:
-        FIG_WIDTH = 6 # inches
-        FIG_HEIGHT = 6 # inches
-        fig = plt.figure(figsize=(FIG_WIDTH, FIG_HEIGHT),
-            tight_layout=True)
+        FIG_WIDTH = 6  # inches
+        FIG_HEIGHT = 6  # inches
+        fig = plt.figure(figsize=(FIG_WIDTH, FIG_HEIGHT), tight_layout=True)
 
     if pca_traj is not None:
-        
         pca_traj_bxtxd = pca_traj
         [n_batch, n_time, n_states] = pca_traj_bxtxd.shape
 
@@ -104,25 +170,22 @@ def plot_fps(fps,
     n_states = fps.n_states
 
     if n_states >= 3:
-
         pca = PCA(n_components=dims)
 
         if pca_traj is not None:
-            pca_traj_btxd = np.reshape(pca_traj_bxtxd,
-                (n_batch*n_time, n_states))
+            pca_traj_btxd = np.reshape(pca_traj_bxtxd, (n_batch * n_time, n_states))
             pca.fit(pca_traj_btxd)
         else:
             pca.fit(fps.xstar)
 
         # For generating figure in paper.md
-        #ax.set_xticks([-2, -1, 0, 1, 2])
-        #ax.set_yticks([-1, 0, 1])
+        # ax.set_xticks([-2, -1, 0, 1, 2])
+        # ax.set_yticks([-1, 0, 1])
     else:
         # For 1D or 0D networks (i.e., never)
         pca = None
 
     if pca_traj is not None and state_traj is not None:
-
         state_traj_bxtxd = state_traj
         [n_batch_s, n_time_s, n_states_s] = state_traj_bxtxd.shape
 
@@ -136,10 +199,19 @@ def plot_fps(fps,
                 z_idx = pca.transform(x_idx[plot_time_idx, :])
             else:
                 z_idx = x_idx[plot_time_idx, :]
-            
+
             plot_123d(z_idx, color=traj_color, linewidth=4)
-            plt.scatter(z_idx[0, 0], z_idx[0, 1], marker="^", color=traj_color, s=250, zorder=10)
-            plt.scatter(z_idx[-1, 0], z_idx[-1, 1], marker="X", color=traj_color, s=250, zorder=10)
+            plt.scatter(
+                z_idx[0, 0], z_idx[0, 1], marker="^", color=traj_color, s=250, zorder=10
+            )
+            plt.scatter(
+                z_idx[-1, 0],
+                z_idx[-1, 1],
+                marker="X",
+                color=traj_color,
+                s=250,
+                zorder=10,
+            )
 
     for init_idx in range(n_inits):
         plot_fixed_point(
@@ -148,22 +220,27 @@ def plot_fps(fps,
             stable_marker=marker,
             stable_color=stable_color,
             scale=mode_scale,
-            alpha=0.5)
+            alpha=0.5,
+        )
 
     return fig
 
-def plot_fixed_point(fp, pca,
+
+def plot_fixed_point(
+    fp,
+    pca,
     scale=1.0,
     max_n_modes=3,
     do_plot_unstable_fps=True,
-    do_plot_stable_modes=False, # (for unstable FPs)
-    stable_color='k',
-    stable_marker='.',
-    unstable_color='w',
+    do_plot_stable_modes=False,  # (for unstable FPs)
+    stable_color="k",
+    stable_marker=".",
+    unstable_color="w",
     unstable_marker=None,
     make_plot=True,
-    **kwargs):
-    '''Plots a single fixed point and its dominant eigenmodes.
+    **kwargs,
+):
+    """Plots a single fixed point and its dominant eigenmodes.
 
     Args:
         ax: Matplotlib figure axis on which to plot everything.
@@ -189,7 +266,7 @@ def plot_fixed_point(fp, pca,
 
     Returns:
         None.
-    '''
+    """
 
     xstar = fp.xstar
     J = fp.J_xstar
@@ -200,23 +277,19 @@ def plot_fixed_point(fp, pca,
     do_plot = (not has_J) or do_plot_unstable_fps
 
     if do_plot:
-
         if n_states >= 3 and pca is not None:
             zstar = pca.transform(xstar)
         else:
             zstar = xstar
 
         if make_plot:
-            plot_123d(zstar,
-                    color=color,
-                    marker=marker,
-                    markersize=12,
-                    **kwargs)
+            plot_123d(zstar, color=color, marker=marker, markersize=12, **kwargs)
         else:
             return zstar
 
+
 def plot_123d(z, **kwargs):
-    '''Plots in 1D, 2D, or 3D.
+    """Plots in 1D, 2D, or 3D.
 
     Args:
         ax: Matplotlib figure axis on which to plot everything.
@@ -228,9 +301,9 @@ def plot_123d(z, **kwargs):
 
     Returns:
         None.
-    '''
+    """
     n_states = z.shape[1]
-    if n_states ==3:
+    if n_states == 3:
         plt.plot(z[:, 0], z[:, 1], z[:, 2], **kwargs)
     elif n_states == 2:
         plt.plot(z[:, 0], z[:, 1], **kwargs)

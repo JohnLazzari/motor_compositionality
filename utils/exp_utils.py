@@ -4,242 +4,123 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
-from utils import load_hp, interpolate_trial
-
 import warnings
+
 warnings.filterwarnings("ignore")
 
-from train import train_2link
 import motornet as mn
-from model import RNNPolicy, GRUPolicy, OrthogonalNet
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import os
-from utils import load_hp, create_dir, save_fig, load_pickle, interpolate_trial, random_orthonormal_basis
-from envs import DlyHalfReach, DlyHalfCircleClk, DlyHalfCircleCClk, DlySinusoid, DlySinusoidInv
-from envs import DlyFullReach, DlyFullCircleClk, DlyFullCircleCClk, DlyFigure8, DlyFigure8Inv
-import matplotlib.pyplot as plt
+from modules.envs.reach import Reach
+from modules.envs.clk_curved_reach import ClkCurvedReach
+from modules.envs.cclk_curved_reach import CClkCurvedReach
+from modules.envs.sinusoid import Sinusoid
+from modules.envs.inv_sinusoid import InvSinusoid
+from modules.envs.reach_back import ReachBack
+from modules.envs.clk_cycle import ClkCycle
+from modules.envs.cclk_cycle import CClkCycle
+from modules.envs.figure_eight import Figure8
+from modules.envs.inv_figure_eight import InvFigure8
 import numpy as np
-import config
-from analysis.clustering import Analysis
-import pickle
-from analysis.FixedPointFinderTorch import FixedPointFinderTorch as FixedPointFinder
-import analysis.plot_utils as plot_utils
-from analysis.manifold import principal_angles, vaf_ratio
-import dPCA
-from dPCA import dPCA
 import tqdm as tqdm
 import itertools
-from sklearn.decomposition import PCA
-from losses import l1_dist
 import scipy
-from mRNNTorch.analysis import flow_field
-import matplotlib.patches as mpatches
-
+from scipy.interpolate import interp1d
+import pickle
+from modules.test import Test
+from modules.multitask_training import MultitaskTrainer
 
 
 env_dict = {
-    "DlyHalfReach": DlyHalfReach, 
-    "DlyHalfCircleClk": DlyHalfCircleClk, 
-    "DlyHalfCircleCClk": DlyHalfCircleCClk, 
-    "DlySinusoid": DlySinusoid, 
-    "DlySinusoidInv": DlySinusoidInv,
-    "DlyFullReach": DlyFullReach,
-    "DlyFullCircleClk": DlyFullCircleClk,
-    "DlyFullCircleCClk": DlyFullCircleCClk,
-    "DlyFigure8": DlyFigure8,
-    "DlyFigure8Inv": DlyFigure8Inv
+    "Reach": Reach,
+    "ClkCurvedReach": ClkCurvedReach,
+    "CClkCurvedReach": CClkCurvedReach,
+    "Sinusoid": Sinusoid,
+    "InvSinusoid": InvSinusoid,
+    "ReachBack": ReachBack,
+    "ClkCycle": ClkCycle,
+    "CClkCycle": CClkCycle,
+    "Figure8": Figure8,
+    "InvFigure8": InvFigure8,
 }
 
 
+def save_pickle(file, obj):
+    # save hyperparameters
+    with open(file, "wb") as outp:
+        pickle.dump(obj, outp, pickle.HIGHEST_PROTOCOL)
 
-def load_model(model_path, model_file, hp, noise_act, noise_inp, device, add_new_rule_inputs=False, num_new_inputs=10):
-    # Loading in model
-    if hp["network"] == "rnn":
 
-        policy = RNNPolicy(
-            hp["inp_size"],
-            hp["hid_size"],
-            6, # Number of muscles in effector 
-            activation_name=hp["activation_name"],
-            noise_level_act=noise_act, 
-            noise_level_inp=noise_inp, 
-            constrained=hp["constrained"], 
-            dt=hp["dt"],
-            t_const=hp["t_const"],
-            device=device,
-            add_new_rule_inputs=add_new_rule_inputs,
-            num_new_inputs=num_new_inputs
+def load_pickle(file):
+    with open(file, "rb") as f:
+        # Load the data from the file
+        mult_train = pickle.load(f)
+    return mult_train
+
+
+def mov_bounds(trial_data):
+    """
+    Helper function to get movement epoch bounds
+    """
+    mov_beg = trial_data["epoch_bounds"]["movement"][0]
+    mov_end = trial_data["epoch_bounds"]["movement"][1]
+    return mov_beg, mov_end
+
+
+def delay_bounds(trial_data):
+    """
+    Helper function to get delay epoch bounds
+    """
+    delay_beg = trial_data["epoch_bounds"]["movement"][0]
+    delay_end = trial_data["epoch_bounds"]["movement"][1]
+    return delay_beg, delay_end
+
+
+def unique_pairs(labels, data):
+    """
+    Helper function to get unique pairs from data using labels
+    """
+    # Get all unique pairs of unit activity across tasks
+    combinations = []
+    for label in labels:
+        combinations.append(
+            (
+                data[label[0]],
+                data[label[1]],
+            )
+        )
+    return combinations
+
+
+def unique_pairs_dict(labels, data):
+    """
+    Helper function to get unique pairs from data using labels
+    """
+    # Get all unique pairs of unit activity across tasks
+    combinations = {}
+    for label in labels:
+        combinations[label] = (
+            data[label[0]],
+            data[label[1]],
         )
 
-        checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
-        policy.load_state_dict(checkpoint['agent_state_dict'])
-
-    elif hp["network"] == "gru":
-
-        policy = GRUPolicy(hp["inp_size"], hp["hid_size"], 6, batch_first=True)
-
-        checkpoint = torch.load(os.path.join(model_path, model_file), map_location=torch.device('cpu'))
-        policy.load_state_dict(checkpoint['agent_state_dict'])
-
-    else:
-        raise ValueError("Not a valid architecture")
-
-    return policy
-
-
-
-def _test(
-    model_path, 
-    model_file, 
-    options, 
-    env, 
-    stim=None, 
-    feedback_mask=None, 
-    noise=False, 
-    noise_act=0.1, 
-    noise_inp=0.01,
-    add_new_rule_inputs=False,
-    num_new_inputs=10,
-    rule_input=None
-):
-
-    """
-    Runs a test episode in the specified environment using a trained RNN or GRU policy.
-
-    Parameters:
-    -----------
-    model_path : str
-        Path to the trained model directory.
-    model_file : str
-        Filename of the model checkpoint.
-    options : dict
-        Dictionary of environment and test configuration options (e.g., batch size).
-    env : callable
-        Environment constructor. Should accept an effector keyword argument.
-    stim : torch.Tensor, optional
-        Tensor to silence or stimulate specific hidden units. Default is None.
-    feedback_mask : torch.Tensor, optional
-        Mask to ablate parts of the observation vector. Default is None.
-    noise : bool, optional
-        Whether to inject noise into the network. Default is False.
-    noise_act : float, optional
-        Standard deviation of noise added to activations. Default is 0.1.
-    noise_inp : float, optional
-        Standard deviation of noise added to inputs. Default is 0.01.
-    add_new_rule_inputs : bool, optional
-        Whether to add additional rule inputs to the RNN. Default is False.
-    num_new_inputs : int, optional
-        Number of new rule inputs to add if `add_new_rule_inputs` is True. Default is 10.
-
-    Returns:
-    --------
-    trial_data : dict
-        Dictionary containing recorded trajectories and internal states for the episode, including:
-            - 'h', 'x': hidden and internal states
-            - 'action': actions taken by the model
-            - 'obs': observations received
-            - 'xy', 'tg': fingertip positions and target positions
-            - 'muscle_acts': muscle activations
-            - 'epoch_bounds': dictionary from the environment
-    """
-
-    device = "cpu"
-    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-    env = env(effector=effector)
-
-    hp = load_hp(model_path)
-    hp = hp.copy()
-    hp["batch_size"] = options["batch_size"]
-
-    policy = load_model(
-        model_path, 
-        model_file, 
-        hp, 
-        noise_act, 
-        noise_inp, 
-        device, 
-        add_new_rule_inputs, 
-        num_new_inputs
-    )
-
-    # initialize batch
-    x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
-    h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
-    
-    obs, info = env.reset(testing=True, options=options)
-    terminated = False
-    trial_data = {}
-    timesteps = 0
-
-    trial_data["h"] = []
-    trial_data["x"] = []
-    trial_data["action"] = []
-    trial_data["muscle_acts"] = []
-    trial_data["obs"] = []
-    trial_data["xy"] = []
-    trial_data["tg"] = []
-
-    # simulate whole episode
-    while not terminated:  # will run until `max_ep_duration` is reached
-
-        if rule_input != None:
-            obs = _replace_rule_input(rule_input, obs)
-
-        # Check if ablating feedback
-        if feedback_mask is not None:
-            obs = obs * feedback_mask
-
-        with torch.no_grad():
-            # Check if silencing units 
-            if stim is not None:
-                x, h, action = policy(obs, x, h, stim, noise=noise)
-            else:
-                x, h, action = policy(obs, x, h, noise=noise)
-
-            # Take step in motornet environment
-            obs, reward, terminated, info = env.step(timesteps, action=action)
-
-        timesteps += 1
-
-        # Save all information regarding episode step
-        trial_data["h"].append(h.unsqueeze(1))  # trajectories
-        trial_data["x"].append(x.unsqueeze(1))  # trajectories
-        trial_data["action"].append(action.unsqueeze(1))  # targets
-        trial_data["obs"].append(obs.unsqueeze(1))  # targets
-        trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
-        trial_data["tg"].append(info["goal"][:, None, :])  # targets
-        trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
-
-    # Concatenate all data into single tensor
-    for key in trial_data:
-        trial_data[key] = torch.cat(trial_data[key], dim=1)
-
-    loss = l1_dist(trial_data["xy"], trial_data["tg"])  # L1 loss on position
-    trial_data["test_loss"] = loss
-
-    trial_data["epoch_bounds"] = env.epoch_bounds
-
-    return trial_data
-
-
+    return combinations
 
 
 def composite_input_optimization(
-    model_path, 
-    model_file, 
-    options, 
-    env, 
+    model_path,
+    model_name,
+    options,
+    env,
     desired_movement,
-    noise=False, 
-    noise_act=0.1, 
+    noise=False,
+    noise_act=0.1,
     noise_inp=0.01,
     add_new_rule_inputs=False,
     num_new_inputs=10,
-    num_iters=250
+    num_iters=250,
 ):
-
     """
     Runs a test episode in the specified environment using a trained RNN or GRU policy.
 
@@ -280,25 +161,23 @@ def composite_input_optimization(
             - 'epoch_bounds': dictionary from the environment
     """
 
-    device = "cpu"
-    hp = load_hp(model_path)
-    hp = hp.copy()
-    hp["batch_size"] = options["batch_size"]
-
-    policy = load_model(
-        model_path, 
-        model_file, 
-        hp, 
-        noise_act, 
-        noise_inp, 
-        device, 
-        add_new_rule_inputs, 
-        num_new_inputs
+    test = Test(
+        model_path,
+        model_name,
+        noise_level_act=noise_act,
+        noise_level_inp=noise_inp,
+        device="cpu",
+        add_new_rule_inputs=add_new_rule_inputs,
+        num_new_inputs=num_new_inputs,
     )
+    test.batch_size = options["batch_size"]
+    policy = test.policy
 
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-    inp1, inp2, inp3, inp4, inp5, inp6, optimizer = create_composite_input(desired_movement, options)
-    
+    inp1, inp2, inp3, inp4, inp5, inp6, optimizer = create_composite_input(
+        desired_movement, options
+    )
+
     best_trial_data = {}
     best_loss = np.inf
     training_losses = []
@@ -306,11 +185,10 @@ def composite_input_optimization(
     print(f"\nBeginning optimization for {desired_movement}")
 
     for it in range(num_iters):
-
         # initialize batch
-        x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
-        h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
-        
+        x = torch.zeros(size=(test.batch_size, test.hid_size))
+        h = torch.zeros(size=(test.batch_size, test.hid_size))
+
         env_tmp = env(effector=effector)
         obs, info = env_tmp.reset(testing=True, options=options)
 
@@ -326,9 +204,9 @@ def composite_input_optimization(
         trial_data["xy"] = []
         trial_data["tg"] = []
 
+        ep_t = 0
         # simulate whole episode
-        while not terminated:  # will run until `max_ep_duration` is reached
-
+        while not terminated:
             # Check if doing composite inputs
             composite_inp = torch.cat([inp1, inp2, inp3, inp4, inp5, inp6], dim=1)
             obs = _replace_rule_input(composite_inp, obs)
@@ -336,7 +214,7 @@ def composite_input_optimization(
             x, h, action = policy(obs, x, h, noise=noise)
 
             # Take step in motornet environment
-            obs, reward, terminated, info = env_tmp.step(timesteps, action=action)
+            obs, _, terminated, info = env_tmp.step(timesteps, action=action)
 
             timesteps += 1
 
@@ -345,15 +223,26 @@ def composite_input_optimization(
             trial_data["x"].append(x.unsqueeze(1))  # trajectories
             trial_data["action"].append(action.unsqueeze(1))  # targets
             trial_data["obs"].append(obs.unsqueeze(1))  # targets
-            trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
+            trial_data["xy"].append(
+                info["states"]["fingertip"][:, None, :]
+            )  # trajectories
             trial_data["tg"].append(info["goal"][:, None, :])  # targets
-            trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
+            trial_data["muscle_acts"].append(
+                info["states"]["muscle"][:, 0].unsqueeze(1)
+            )
+
+            # small check just in case something goes wrong in here
+            ep_t += 1
+            if ep_t > 10000:
+                break
 
         # Concatenate all data into single tensor
         for key in trial_data:
             trial_data[key] = torch.cat(trial_data[key], dim=1)
 
-        loss = l1_dist(trial_data["xy"], trial_data["tg"])  # L1 loss on position
+        loss = MultitaskTrainer.l1_dist(
+            trial_data["xy"], trial_data["tg"]
+        )  # L1 loss on position
         print(f"loss at iteration {it}: {loss.item()}")
         training_losses.append(loss.item())
 
@@ -371,24 +260,20 @@ def composite_input_optimization(
         best_trial_data[key] = best_trial_data[key].detach()
     best_trial_data["epoch_bounds"] = env_tmp.epoch_bounds
     best_trial_data["test_loss"] = training_losses
-    
+
     return best_trial_data
 
 
-
-
-
 def test_sequential_inputs(
-    model_path, 
-    model_file, 
-    options, 
+    model_path,
+    model_file,
+    options,
     extension,
     retraction,
-    noise=False, 
-    noise_act=0.1, 
-    noise_inp=0.01
+    noise=False,
+    noise_act=0.1,
+    noise_inp=0.01,
 ):
-
     """
     Runs a test episode in the specified environment using a trained RNN or GRU policy.
 
@@ -438,26 +323,25 @@ def test_sequential_inputs(
     hp = hp.copy()
     hp["batch_size"] = options["batch_size"]
 
-    policy = load_model(
-        model_path, 
-        model_file, 
-        hp, 
-        noise_act, 
-        noise_inp, 
-        device
-    )
+    policy = load_model(model_path, model_file, hp, noise_act, noise_inp, device)
 
     # initialize batch
     x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
     h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
-    
+
     obs, info = retraction_env.reset(testing=True, options=options)
     _, _ = extension_env.reset(testing=True, options=options)
 
     extension_rule_input = extension_env.rule_input
     retraction_rule_input = retraction_env.rule_input
 
-    middle_movement = int((retraction_env.epoch_bounds["movement"][1] + retraction_env.epoch_bounds["movement"][0]) / 2)
+    middle_movement = int(
+        (
+            retraction_env.epoch_bounds["movement"][1]
+            + retraction_env.epoch_bounds["movement"][0]
+        )
+        / 2
+    )
     terminated = False
     trial_data = {}
     timesteps = 0
@@ -472,12 +356,10 @@ def test_sequential_inputs(
 
     # simulate whole episode
     while not terminated:  # will run until `max_ep_duration` is reached
-
         with torch.no_grad():
-
             if timesteps < middle_movement:
                 obs = _replace_rule_input(extension_rule_input, obs)
-            
+
             if timesteps == middle_movement:
                 for t in range(2):
                     obs = _replace_rule_input(retraction_rule_input, obs)
@@ -486,7 +368,9 @@ def test_sequential_inputs(
             x, h, action = policy(obs, x, h, noise=noise)
 
             # Take step in motornet environment
-            obs, reward, terminated, info = retraction_env.step(timesteps, action=action)
+            obs, reward, terminated, info = retraction_env.step(
+                timesteps, action=action
+            )
 
         timesteps += 1
 
@@ -511,7 +395,6 @@ def test_sequential_inputs(
     return trial_data
 
 
-
 def create_composite_input(desired_movement, options):
     # desired movement represents the end result kinematic (say a curved reach)
     # The composite inputs that generate that movement will be manually crafted and tested
@@ -525,8 +408,7 @@ def create_composite_input(desired_movement, options):
         env_rule_inputs[env] = env_tmp.rule_input
 
     # Desired movement can be any movement except reach and reachback
-    if desired_movement == "DlyHalfReach":
-
+    if desired_movement == "Reach":
         reach_inp = torch.zeros(size=(options["batch_size"], 1))
         clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
@@ -535,10 +417,9 @@ def create_composite_input(desired_movement, options):
         other_inputs = torch.zeros(size=(options["batch_size"], 5))
 
         optimizer = optim.Adam([clkcr_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
-    
-    # Desired movement can be any movement except reach and reachback
-    if desired_movement == "DlyHalfCircleClk":
 
+    # Desired movement can be any movement except reach and reachback
+    if desired_movement == "ClkCurvedReach":
         reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         clkcr_inp = torch.zeros(size=(options["batch_size"], 1))
         cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
@@ -548,8 +429,7 @@ def create_composite_input(desired_movement, options):
 
         optimizer = optim.Adam([reach_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
 
-    elif desired_movement == "DlyHalfCircleCClk":
-
+    elif desired_movement == "CClkCurvedReach":
         reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         cclkcr_inp = torch.zeros(size=(options["batch_size"], 1))
@@ -559,8 +439,7 @@ def create_composite_input(desired_movement, options):
 
         optimizer = optim.Adam([reach_inp, clkcr_inp, sin_inp, invsin_inp], lr=1e-1)
 
-    elif desired_movement == "DlySinusoid": 
-
+    elif desired_movement == "Sinusoid":
         reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
@@ -570,8 +449,7 @@ def create_composite_input(desired_movement, options):
 
         optimizer = optim.Adam([reach_inp, clkcr_inp, cclkcr_inp, invsin_inp], lr=1e-1)
 
-    elif desired_movement == "DlySinusoidInv":
-
+    elif desired_movement == "InvSinusoid":
         reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
@@ -580,10 +458,18 @@ def create_composite_input(desired_movement, options):
         other_inputs = torch.zeros(size=(options["batch_size"], 5))
 
         optimizer = optim.Adam([reach_inp, clkcr_inp, cclkcr_inp, sin_inp], lr=1e-1)
+    else:
+        raise ValueError
 
-    return reach_inp, clkcr_inp, cclkcr_inp, sin_inp, invsin_inp, other_inputs, optimizer
-
-
+    return (
+        reach_inp,
+        clkcr_inp,
+        cclkcr_inp,
+        sin_inp,
+        invsin_inp,
+        other_inputs,
+        optimizer,
+    )
 
 
 def _replace_rule_input(composite_inp, obs):
@@ -595,17 +481,17 @@ def _replace_rule_input(composite_inp, obs):
     return obs_new_rule
 
 
-
-
-
 def get_middle_movement(trial_data):
-    return int((trial_data["epoch_bounds"]["movement"][1] + trial_data["epoch_bounds"]["movement"][0]) / 2)
-
-
+    return int(
+        (
+            trial_data["epoch_bounds"]["movement"][1]
+            + trial_data["epoch_bounds"]["movement"][0]
+        )
+        / 2
+    )
 
 
 def split_movement_epoch(trial_data, task_period, system):
-
     """
     Extracts a portion of the movement epoch data from the specified system.
 
@@ -627,19 +513,27 @@ def split_movement_epoch(trial_data, task_period, system):
     middle_movement = get_middle_movement(trial_data)
 
     if task_period == "first":
-        trial_data_h_epoch = trial_data[system][:, trial_data["epoch_bounds"]["movement"][0]:middle_movement]
+        trial_data_h_epoch = trial_data[system][
+            :, trial_data["epoch_bounds"]["movement"][0] : middle_movement
+        ]
     elif task_period == "second":
-        trial_data_h_epoch = trial_data[system][:, middle_movement:trial_data["epoch_bounds"]["movement"][1]]
+        trial_data_h_epoch = trial_data[system][
+            :, middle_movement : trial_data["epoch_bounds"]["movement"][1]
+        ]
     elif task_period == "all":
-        trial_data_h_epoch = trial_data[system][:, trial_data["epoch_bounds"]["movement"][0]:trial_data["epoch_bounds"]["movement"][1]]
-    
+        trial_data_h_epoch = trial_data[system][
+            :,
+            trial_data["epoch_bounds"]["movement"][0] : trial_data["epoch_bounds"][
+                "movement"
+            ][1],
+        ]
+    else:
+        raise ValueError
+
     return trial_data_h_epoch
 
 
-
-
 def get_interpolation_input(trial_data, task_period):
-
     """
     Returns a single observation from the movement epoch for interpolation.
 
@@ -656,21 +550,31 @@ def get_interpolation_input(trial_data, task_period):
         1D array (features,) from the selected time point.
     """
 
-    middle_movement = int((trial_data["epoch_bounds"]["movement"][1] + trial_data["epoch_bounds"]["movement"][0]) / 2)
+    middle_movement = int(
+        (
+            trial_data["epoch_bounds"]["movement"][1]
+            + trial_data["epoch_bounds"]["movement"][0]
+        )
+        / 2
+    )
 
-    if task_period == "first":
-        interpolation_point = int((middle_movement + trial_data["epoch_bounds"]["movement"][0]) / 2)
+    if task_period == "extension":
+        interpolation_point = int(
+            (middle_movement + trial_data["epoch_bounds"]["movement"][0]) / 2
+        )
         inp = trial_data["obs"][:, interpolation_point]
-    elif task_period == "second":
-        interpolation_point = int((middle_movement + trial_data["epoch_bounds"]["movement"][1]) / 2)
+    elif task_period == "retraction":
+        interpolation_point = int(
+            (middle_movement + trial_data["epoch_bounds"]["movement"][1]) / 2
+        )
         inp = trial_data["obs"][:, interpolation_point]
     elif task_period == "all":
         # This option only makes sense if using a half task
         inp = trial_data["obs"][:, middle_movement]
-    
+    else:
+        raise ValueError
+
     return inp
-
-
 
 
 def distances_from_combinations(combinations, batch_size):
@@ -698,7 +602,6 @@ def distances_from_combinations(combinations, batch_size):
     return dist
 
 
-
 def average_angular_distance(h1, h2):
     """
     Computes the average angular distance (in radians) between corresponding rows of two matrices.
@@ -714,8 +617,6 @@ def average_angular_distance(h1, h2):
     norms = torch.linalg.norm(h1, dim=1) * torch.linalg.norm(h2, dim=1)
     cos_angles = inner_products / norms
     return torch.arccos(cos_angles).mean()
-
-
 
 
 def angles_from_combinations(combinations, batch_size):
@@ -743,8 +644,6 @@ def angles_from_combinations(combinations, batch_size):
     return angles
 
 
-
-
 def shapes_from_combinations(combinations, batch_size):
     """
     Computes Procrustes shape disparity between trajectory tensor pairs in each combination.
@@ -770,8 +669,6 @@ def shapes_from_combinations(combinations, batch_size):
     return traj_dists
 
 
-
-
 def convert_motif_dict_to_list(target_dict, data):
     """
     Flattens values in `data` corresponding to keys in `target_dict`, accounting for reversed key ordering.
@@ -793,14 +690,14 @@ def convert_motif_dict_to_list(target_dict, data):
     return target_data
 
 
-
-
 def pvalues(label_list, data_dict, metric):
     combination_labels = list(itertools.combinations(label_list, 2))
     print("\n")
     # Print out significance here
     for combination in combination_labels:
-        result = scipy.stats.mannwhitneyu(data_dict[combination[0]], data_dict[combination[1]])
+        result = scipy.stats.mannwhitneyu(
+            data_dict[combination[0]], data_dict[combination[1]]
+        )
         pvalue = result[1]
         if pvalue < 0.001:
             pvalue_str = f"***, {pvalue}"
@@ -810,5 +707,56 @@ def pvalues(label_list, data_dict, metric):
             pvalue_str = f"*, {pvalue}"
         else:
             pvalue_str = "Not Significant"
-        print(f"pvalue for {combination[0]} and {combination[1]} in metric {metric} is: {pvalue_str}")
+        print(
+            f"pvalue for {combination[0]} and {combination[1]} in metric {metric} is: {pvalue_str}"
+        )
     print("\n")
+
+
+def interpolate_trial(ys, desired_x):
+    """
+    ys is the time series [timesteps, neurons]
+    desired x is the total number of points desired after interpolating
+    """
+    # range for x is somewhat arb, going with 0-1
+    xs = torch.linspace(0, 1, ys.shape[0])
+    new_xs = torch.linspace(0, 1, desired_x)
+
+    int_neurons = []
+    # Loop through each neuron to get single timeseries
+    for n in range(ys.shape[1]):
+        t_series = interp1d(xs, ys[:, n])(new_xs)
+        int_neurons.append(torch.tensor(t_series))
+    new_t_series = torch.stack(int_neurons, dim=1)
+    return new_t_series
+
+
+def random_orthonormal_basis(n, seed=None):
+    """
+    Generate an n‑dimensional random orthonormal basis.
+
+    Parameters
+    ----------
+    n : int
+        Dimension of the ambient space (must be ≥ 1).
+    seed : int, optional
+        Random‑seed for reproducibility.
+
+    Returns
+    -------
+    Q : ndarray, shape (n, n)
+        Columns form an orthonormal basis (QᵀQ = I).
+    """
+    if n < 1:
+        raise ValueError("n must be a positive integer")
+
+    rng = np.random.default_rng(seed)
+    A = rng.standard_normal((n, n))  # random matrix
+    Q, _ = np.linalg.qr(A)  # QR factorization ⇒ Q is orthonormal
+
+    # Fix possible sign ambiguity so the first non‑zero entry in each column is positive
+    # (optional, just for consistency)
+    signs = np.sign(np.diag(Q.T @ A))
+    Q *= signs
+
+    return Q
