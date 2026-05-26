@@ -26,7 +26,7 @@ from exp_utils import (
 from modules.test import Test
 from utils.plot_utils import save_fig, standard_2d_ax, empty_3d, ax_3d_no_grid
 
-# ---------------- Helper Functions -----------------
+##################### Helper Functions ###################
 
 
 def _3d_pca_across_conditions(ax, condition_data):
@@ -132,7 +132,7 @@ def _build_interpolation_input(input_1, input_2, input_component):
     return interpolated_input
 
 
-# ------------------- Primary Experiments ---------------------------
+################### Primary utility functions ######################
 
 
 def interpolated_fps(

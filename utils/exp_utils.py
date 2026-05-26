@@ -28,8 +28,6 @@ import itertools
 import scipy
 from scipy.interpolate import interp1d
 import pickle
-from modules.test import Test
-from modules.multitask_training import MultitaskTrainer
 
 
 env_dict = {
@@ -38,6 +36,22 @@ env_dict = {
     "CClkCurvedReach": CClkCurvedReach,
     "Sinusoid": Sinusoid,
     "InvSinusoid": InvSinusoid,
+    "ReachBack": ReachBack,
+    "ClkCycle": ClkCycle,
+    "CClkCycle": CClkCycle,
+    "Figure8": Figure8,
+    "InvFigure8": InvFigure8,
+}
+
+extension_dict = {
+    "Reach": Reach,
+    "ClkCurvedReach": ClkCurvedReach,
+    "CClkCurvedReach": CClkCurvedReach,
+    "Sinusoid": Sinusoid,
+    "InvSinusoid": InvSinusoid,
+}
+
+retraction_dict = {
     "ReachBack": ReachBack,
     "ClkCycle": ClkCycle,
     "CClkCycle": CClkCycle,
@@ -106,162 +120,6 @@ def unique_pairs_dict(labels, data):
         )
 
     return combinations
-
-
-def composite_input_optimization(
-    model_path,
-    model_name,
-    options,
-    env,
-    desired_movement,
-    noise=False,
-    noise_act=0.1,
-    noise_inp=0.01,
-    add_new_rule_inputs=False,
-    num_new_inputs=10,
-    num_iters=250,
-):
-    """
-    Runs a test episode in the specified environment using a trained RNN or GRU policy.
-
-    Parameters:
-    -----------
-    model_path : str
-        Path to the trained model directory.
-    model_file : str
-        Filename of the model checkpoint.
-    options : dict
-        Dictionary of environment and test configuration options (e.g., batch size).
-    env : callable
-        Environment constructor. Should accept an effector keyword argument.
-    stim : torch.Tensor, optional
-        Tensor to silence or stimulate specific hidden units. Default is None.
-    feedback_mask : torch.Tensor, optional
-        Mask to ablate parts of the observation vector. Default is None.
-    noise : bool, optional
-        Whether to inject noise into the network. Default is False.
-    noise_act : float, optional
-        Standard deviation of noise added to activations. Default is 0.1.
-    noise_inp : float, optional
-        Standard deviation of noise added to inputs. Default is 0.01.
-    add_new_rule_inputs : bool, optional
-        Whether to add additional rule inputs to the RNN. Default is False.
-    num_new_inputs : int, optional
-        Number of new rule inputs to add if `add_new_rule_inputs` is True. Default is 10.
-
-    Returns:
-    --------
-    trial_data : dict
-        Dictionary containing recorded trajectories and internal states for the episode, including:
-            - 'h', 'x': hidden and internal states
-            - 'action': actions taken by the model
-            - 'obs': observations received
-            - 'xy', 'tg': fingertip positions and target positions
-            - 'muscle_acts': muscle activations
-            - 'epoch_bounds': dictionary from the environment
-    """
-
-    test = Test(
-        model_path,
-        model_name,
-        noise_level_act=noise_act,
-        noise_level_inp=noise_inp,
-        device="cpu",
-        add_new_rule_inputs=add_new_rule_inputs,
-        num_new_inputs=num_new_inputs,
-    )
-    test.batch_size = options["batch_size"]
-    policy = test.policy
-
-    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-    inp1, inp2, inp3, inp4, inp5, inp6, optimizer = create_composite_input(
-        desired_movement, options
-    )
-
-    best_trial_data = {}
-    best_loss = np.inf
-    training_losses = []
-
-    print(f"\nBeginning optimization for {desired_movement}")
-
-    for it in range(num_iters):
-        # initialize batch
-        x = torch.zeros(size=(test.batch_size, test.hid_size))
-        h = torch.zeros(size=(test.batch_size, test.hid_size))
-
-        env_tmp = env(effector=effector)
-        obs, info = env_tmp.reset(testing=True, options=options)
-
-        terminated = False
-        trial_data = {}
-        timesteps = 0
-
-        trial_data["h"] = []
-        trial_data["x"] = []
-        trial_data["action"] = []
-        trial_data["muscle_acts"] = []
-        trial_data["obs"] = []
-        trial_data["xy"] = []
-        trial_data["tg"] = []
-
-        ep_t = 0
-        # simulate whole episode
-        while not terminated:
-            # Check if doing composite inputs
-            composite_inp = torch.cat([inp1, inp2, inp3, inp4, inp5, inp6], dim=1)
-            obs = _replace_rule_input(composite_inp, obs)
-
-            x, h, action = policy(obs, x, h, noise=noise)
-
-            # Take step in motornet environment
-            obs, _, terminated, info = env_tmp.step(timesteps, action=action)
-
-            timesteps += 1
-
-            # Save all information regarding episode step
-            trial_data["h"].append(h.unsqueeze(1))  # trajectories
-            trial_data["x"].append(x.unsqueeze(1))  # trajectories
-            trial_data["action"].append(action.unsqueeze(1))  # targets
-            trial_data["obs"].append(obs.unsqueeze(1))  # targets
-            trial_data["xy"].append(
-                info["states"]["fingertip"][:, None, :]
-            )  # trajectories
-            trial_data["tg"].append(info["goal"][:, None, :])  # targets
-            trial_data["muscle_acts"].append(
-                info["states"]["muscle"][:, 0].unsqueeze(1)
-            )
-
-            # small check just in case something goes wrong in here
-            ep_t += 1
-            if ep_t > 10000:
-                break
-
-        # Concatenate all data into single tensor
-        for key in trial_data:
-            trial_data[key] = torch.cat(trial_data[key], dim=1)
-
-        loss = MultitaskTrainer.l1_dist(
-            trial_data["xy"], trial_data["tg"]
-        )  # L1 loss on position
-        print(f"loss at iteration {it}: {loss.item()}")
-        training_losses.append(loss.item())
-
-        trial_data["rule_input"] = composite_inp.detach().clone()
-
-        if loss < best_loss:
-            best_trial_data = trial_data
-            best_loss = loss.item()
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-    for key in trial_data:
-        best_trial_data[key] = best_trial_data[key].detach()
-    best_trial_data["epoch_bounds"] = env_tmp.epoch_bounds
-    best_trial_data["test_loss"] = training_losses
-
-    return best_trial_data
 
 
 def test_sequential_inputs(
@@ -393,83 +251,6 @@ def test_sequential_inputs(
     trial_data["epoch_bounds"] = retraction_env.epoch_bounds
 
     return trial_data
-
-
-def create_composite_input(desired_movement, options):
-    # desired movement represents the end result kinematic (say a curved reach)
-    # The composite inputs that generate that movement will be manually crafted and tested
-
-    # Get the rule input for each env with correct batch size
-    env_rule_inputs = {}
-    for env in env_dict:
-        effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-        env_tmp = env_dict[env](effector=effector)
-        _, _ = env_tmp.reset(testing=True, options=options)
-        env_rule_inputs[env] = env_tmp.rule_input
-
-    # Desired movement can be any movement except reach and reachback
-    if desired_movement == "Reach":
-        reach_inp = torch.zeros(size=(options["batch_size"], 1))
-        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        other_inputs = torch.zeros(size=(options["batch_size"], 5))
-
-        optimizer = optim.Adam([clkcr_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
-
-    # Desired movement can be any movement except reach and reachback
-    if desired_movement == "ClkCurvedReach":
-        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        clkcr_inp = torch.zeros(size=(options["batch_size"], 1))
-        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        other_inputs = torch.zeros(size=(options["batch_size"], 5))
-
-        optimizer = optim.Adam([reach_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
-
-    elif desired_movement == "CClkCurvedReach":
-        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        cclkcr_inp = torch.zeros(size=(options["batch_size"], 1))
-        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        other_inputs = torch.zeros(size=(options["batch_size"], 5))
-
-        optimizer = optim.Adam([reach_inp, clkcr_inp, sin_inp, invsin_inp], lr=1e-1)
-
-    elif desired_movement == "Sinusoid":
-        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        sin_inp = torch.zeros(size=(options["batch_size"], 1))
-        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        other_inputs = torch.zeros(size=(options["batch_size"], 5))
-
-        optimizer = optim.Adam([reach_inp, clkcr_inp, cclkcr_inp, invsin_inp], lr=1e-1)
-
-    elif desired_movement == "InvSinusoid":
-        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
-        invsin_inp = torch.zeros(size=(options["batch_size"], 1))
-        other_inputs = torch.zeros(size=(options["batch_size"], 5))
-
-        optimizer = optim.Adam([reach_inp, clkcr_inp, cclkcr_inp, sin_inp], lr=1e-1)
-    else:
-        raise ValueError
-
-    return (
-        reach_inp,
-        clkcr_inp,
-        cclkcr_inp,
-        sin_inp,
-        invsin_inp,
-        other_inputs,
-        optimizer,
-    )
 
 
 def _replace_rule_input(composite_inp, obs):

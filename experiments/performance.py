@@ -8,7 +8,6 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-import torch
 import os
 from utils.plot_utils import create_dir, save_fig, standard_2d_ax
 import matplotlib.pyplot as plt
@@ -21,14 +20,12 @@ plt.rcParams.update({"font.size": 18})  # Sets default font size for all text
 
 
 def plot_test_performance(model_name):
-    """This function will simply plot the target at each timestep for different orientations of the task
-        This is not for kinematics
+    """
+    This function will plot the validation loss of the model
+    for each env during training
 
     Args:
-        config_path (_type_): _description_
-        model_path (_type_): _description_
-        model_file (_type_): _description_
-        exp_path (_type_): _description_
+        model_name (str): name of model that was saved
     """
     exp_path = f"results/{model_name}/performance"
 
@@ -38,8 +35,10 @@ def plot_test_performance(model_name):
     for env in env_dict.keys():
         testing_performance[env] = []
 
-    env_test_losses = load_pickle(os.path.join(exp_path, "val_env_losses.pkl"))
-    plt.figure(figsize=(6, 4))
+    env_test_losses = load_pickle(
+        os.path.join("checkpoints", model_name, "val_env_losses.pkl")
+    )
+    plt.figure(figsize=(10, 6))
     for env in env_test_losses:
         plt.plot(env_test_losses[env], linewidth=4, label=env)
 
@@ -54,9 +53,10 @@ def plot_test_performance(model_name):
     save_fig(os.path.join(exp_path, "testing_performance"), eps=True)
 
 
+# TODO update this function
 def plot_test_performance_held_out(model_name):
-    """This function will simply plot the target at each timestep for different orientations of the task
-        This is not for kinematics
+    """
+    Plots the validation performance for tasks
 
     Args:
         config_path (_type_): _description_
@@ -65,7 +65,7 @@ def plot_test_performance_held_out(model_name):
         exp_path (_type_): _description_
     """
     model_path = f"checkpoints/{model_name}"
-    model_path_baseline = f"checkpoints/rnn256_softplus_sd1e-3_ma1e-2"
+    model_path_baseline = f"checkpoints/{model_name}"
     exp_path = f"results/{model_name}/performance"
 
     env_list = ["DlyHalfCircleCClk", "DlyFullCircleCClk"]
@@ -116,6 +116,7 @@ def plot_test_performance_held_out(model_name):
     save_fig(os.path.join(exp_path, "testing_performance"), eps=True)
 
 
+# TODO update this function
 def plot_transfer_losses():
     model_names = [
         "rnn256_softplus_heldout_transfer",

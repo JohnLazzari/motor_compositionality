@@ -8,8 +8,10 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-import math
 import torch
+import torch.nn as nn
+import torch.optim as optim
+import motornet as mn
 import os
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,10 +24,8 @@ from utils.exp_utils import (
     env_dict,
     pvalues,
     mov_bounds,
-    delay_bounds,
     unique_pairs_dict,
     get_middle_movement,
-    composite_input_optimization,
     distances_from_combinations,
     angles_from_combinations,
     shapes_from_combinations,
@@ -240,7 +240,6 @@ def _get_mean_act(
     return env_hs, envs_to_use
 
 
-# TODO try to add more motifs to this, direction and speed axes?
 def epoch_pcs(
     model_name, epoch, movement_type, add_new_rule_inputs=False, plot_3d=False
 ):
@@ -300,8 +299,12 @@ def epoch_pcs(
     save_fig(os.path.join(exp_path, f"{epoch}_{movement_type}_pcs"), eps=True)
 
 
-def _plot_metric_scatter(
-    all_combinations,
+######################################################
+#            Task Metric Experiments                 #
+######################################################
+
+
+def create_metric_scatter(
     combinations,
     combination_colors,
     metric1,
@@ -312,8 +315,12 @@ def _plot_metric_scatter(
 ):
     _, ax = standard_2d_ax()
 
-    task_metric1 = convert_motif_dict_to_list(all_combinations, metric1)
-    task_metric2 = convert_motif_dict_to_list(all_combinations, metric2)
+    task_metric1 = convert_motif_dict_to_list(
+        [key for key in combinations.keys()], metric1
+    )
+    task_metric2 = convert_motif_dict_to_list(
+        [key for key in combinations.keys()], metric2
+    )
 
     metric1_list = np.array(task_metric1).reshape((-1, 1))
     metric2_list = np.array(task_metric2).reshape((-1, 1))
@@ -343,35 +350,15 @@ def _plot_metric_scatter(
     )
 
 
-def _plot_metric_bar(
-    combinations, metric, exp_path, metric_name, combination_labels, combination_colors
-):
+def _plot_metric_bar(combinations, metric, exp_path, metric_name, combination_colors):
     _, ax = standard_2d_ax()
 
     combination_means = []
     combination_stds = []
     combination_data = {}
-    for c, combination in enumerate(combinations):
-        task_metric = convert_motif_dict_to_list(combination, metric)
-
-        """
-            This is for finding examples for two_task_pcs.
-            Delete this once done for sure, change as needed to find different examples
-        """
-
-        if (
-            combination_labels[c] == "extension_tasks"
-            and metric_name == "muscle_shapes"
-        ):
-            min_val = np.argmax(task_metric)
-            condition_val = min_val % 32
-            min_val /= 32
-            min_val = math.floor(min_val)
-            print(
-                f"ext pair with highest muscle shape is: {combination[min_val]}, {condition_val}"
-            )
-
-        combination_data[combination_labels[c]] = task_metric
+    for combination in combinations:
+        task_metric = convert_motif_dict_to_list(combinations[combination], metric)
+        combination_data[combination] = task_metric
         combination_means.append(sum(task_metric) / len(task_metric))
         combination_stds.append(np.std(task_metric, ddof=1))
 
@@ -427,7 +414,47 @@ def _gather_env_pairs_from_trial(model_name, system, options):
     return trial_data, combinations, combination_labels
 
 
-def trajectory_alignment(model_name):
+def gather_all_traj_metrics(model_name, system):
+    if system != "h" or system != "muscle":
+        raise ValueError
+
+    options = {
+        "batch_size": 32,
+        "reach_conds": np.tile(np.arange(0, 32, 1), int(32 / 32)),
+        "speed_cond": 5,
+    }
+
+    _, combinations, combination_labels = _gather_env_pairs_from_trial(
+        model_name, system, options
+    )
+
+    print("Computing Distances...")
+    distances = distances_from_combinations(combinations, options["batch_size"])
+    print("Computing Angles...")
+    angles = angles_from_combinations(combinations, options["batch_size"])
+    print("Computing Shapes...")
+    shapes = shapes_from_combinations(combinations, options["batch_size"])
+
+    all_subsets = {
+        "subset_tasks": subset_tasks,
+        "retraction_tasks": retraction_tasks,
+        "extension_tasks": extension_tasks,
+        "extension_retraction_tasks": extension_retraction_tasks,
+        "all_tasks": combination_labels,
+    }
+
+    all_subset_colors = ["purple", "pink", "blue", "orange", "grey"]
+
+    all_metrics = {
+        "distances": distances,
+        "angles": angles,
+        "shapes": shapes,
+    }
+
+    return all_subsets, all_subset_colors, all_metrics
+
+
+def trajectory_metric_bar_plot(model_name, system):
     """
     Utilize metrics such as angle, distance, and disparity between trajectories to see
     how different task trajectories are aligned to one another
@@ -437,59 +464,9 @@ def trajectory_alignment(model_name):
 
     exp_path = f"results/{model_name}/compositionality/alignment"
 
-    options = {
-        "batch_size": 32,
-        "reach_conds": np.tile(np.arange(0, 32, 1), int(32 / 32)),
-        "speed_cond": 5,
-    }
-
-    _, combinations_h, combination_labels = _gather_env_pairs_from_trial(
-        model_name, "h", options
+    all_subsets, all_subset_colors, all_metrics = gather_all_traj_metrics(
+        model_name, system
     )
-    _, combinations_muscle, _ = _gather_env_pairs_from_trial(
-        model_name, "muscle", options
-    )
-
-    print("Computing Distances...")
-    distances_h = distances_from_combinations(combinations_h, options["batch_size"])
-    distances_muscle = distances_from_combinations(
-        combinations_muscle, options["batch_size"]
-    )
-
-    print("Computing Angles...")
-    angles_h = angles_from_combinations(combinations_h, options["batch_size"])
-    angles_muscle = shapes_from_combinations(combinations_muscle, options["batch_size"])
-
-    print("Computing Shapes...")
-    shapes_h = shapes_from_combinations(combinations_h, options["batch_size"])
-    shapes_muscle = shapes_from_combinations(combinations_muscle, options["batch_size"])
-
-    all_subsets = [
-        subset_tasks,
-        retraction_tasks,
-        extension_tasks,
-        extension_retraction_tasks,
-        combination_labels,
-    ]
-
-    all_subset_labels = [
-        "subset_tasks",
-        "retraction_tasks",
-        "extension_tasks",
-        "extension_retraction_tasks",
-        "all_tasks",
-    ]
-
-    all_subset_colors = ["purple", "pink", "blue", "orange", "grey"]
-
-    all_metrics = {
-        "neural_distances": distances_h,
-        "muscle_distances": distances_muscle,
-        "neural_angles": angles_h,
-        "muscle_angles": angles_muscle,
-        "neural_shapes": shapes_h,
-        "muscle_shapes": shapes_muscle,
-    }
 
     # Make each bar plot
     for metric in all_metrics:
@@ -498,79 +475,21 @@ def trajectory_alignment(model_name):
             all_metrics[metric],
             exp_path,
             metric,
-            all_subset_labels,
             all_subset_colors,
         )
 
-    # -------------------------------------------------------------- SHAPE DISTRIBUTIONS
 
-    all_shapes_h = convert_motif_dict_to_list(combination_labels, shapes_h)
-    all_shapes_muscle = convert_motif_dict_to_list(combination_labels, shapes_muscle)
+def plot_metric_scatter(model_name, system):
+    exp_path = f"results/{model_name}/compositionality/alignment"
 
-    bins = tuple(np.linspace(0, 1, 15))
-    weights_data_h = np.ones_like(all_shapes_h) / len(all_shapes_h)
-    weights_data_muscle = np.ones_like(all_shapes_muscle) / len(all_shapes_muscle)
-    plt.hist(all_shapes_h, color="blue", alpha=0.5, bins=bins, weights=weights_data_h)
-    plt.hist(
-        all_shapes_muscle,
-        color="purple",
-        alpha=0.5,
-        bins=bins,
-        weights=weights_data_muscle,
+    all_subsets, all_subset_colors, all_metrics = gather_all_traj_metrics(
+        model_name, system
     )
-    plt.axvline(
-        sum(all_shapes_h) / len(all_shapes_h),
-        color="blue",
-        linestyle="dashed",
-        linewidth=2,
-    )
-    plt.axvline(
-        sum(all_shapes_muscle) / len(all_shapes_muscle),
-        color="purple",
-        linestyle="dashed",
-        linewidth=2,
-    )
-    plt.xlim([0, 1])
-    save_fig(os.path.join(exp_path, "movement", "neural_muscle_shape_dists"), eps=True)
-
-    # ------------------------------------------------------------- ANGLE DISTRIBUTIONS
-
-    angle_h_dist = convert_motif_dict_to_list(combination_labels, angles_h)
-    angle_muscle_dist = convert_motif_dict_to_list(combination_labels, angles_muscle)
-
-    bins = tuple(np.linspace(0, 1.5, 15))
-    weights_data_h = np.ones_like(angle_h_dist) / len(angle_h_dist)
-    weights_data_muscle = np.ones_like(angle_muscle_dist) / len(angle_muscle_dist)
-    plt.hist(angle_h_dist, color="blue", alpha=0.5, bins=bins, weights=weights_data_h)
-    plt.hist(
-        angle_muscle_dist,
-        color="purple",
-        alpha=0.5,
-        bins=bins,
-        weights=weights_data_muscle,
-    )
-    plt.axvline(
-        sum(angle_h_dist) / len(angle_h_dist),
-        color="blue",
-        linestyle="dashed",
-        linewidth=2,
-    )
-    plt.axvline(
-        sum(angle_muscle_dist) / len(angle_muscle_dist),
-        color="purple",
-        linestyle="dashed",
-        linewidth=2,
-    )
-    plt.xlim([0, 1.5])
-    save_fig(os.path.join(exp_path, "movement", "neural_muscle_angle_dists"), eps=True)
-
-    # -------------------------------------- SCATTER PLOTS
 
     for idx1, metric1 in enumerate(all_metrics):
         for idx2, metric2 in enumerate(all_metrics):
             if idx1 != idx2:
-                _plot_metric_scatter(
-                    combination_labels,
+                create_metric_scatter(
                     all_subsets,
                     all_subset_colors,
                     all_metrics[metric1],
@@ -942,139 +861,246 @@ def task_similarity_classification(model_name, load_file_name, save_name):
 ######################################################
 
 
-# Get the loss from every composite input on each environment and get the heat map
-def composite_rule_input_heat_map(model_name):
-    exp_path = f"results/{model_name}/compositionality/composite_rule_inputs/heat_map"
-    load_name = f"checkpoints/{model_name}/composite_rule_inputs.pkl"
-    trial_data = load_pickle(load_name)
-
-    for env in env_dict_ext:
-        fig, ax = no_ticks_2d_ax()
-        rule_input = trial_data[env]["rule_input"][:, :5].numpy()
-        im = ax.imshow(rule_input, cmap="RdBu", vmin=2, vmax=-2)
-        _ = fig.colorbar(im, ax=ax, fraction=0.07, pad=0.04)
-        fig.tight_layout()
-        save_fig(os.path.join(exp_path, f"extension_heat_map_{env}"), eps=True)
+def _replace_rule_input(composite_inp, obs):
+    B, N = obs.shape
+    # This will not account for greater than two
+    if composite_inp.dim() < 2:
+        composite_inp = composite_inp.repeat(B, 1)
+    obs_new_rule = torch.cat([composite_inp, obs[:, 10:]], dim=1)
+    return obs_new_rule
 
 
-# Get the loss from every composite input on each environment and get the heat map
-def composite_rule_input_kinematics(model_name):
-    def plot_env_kinematics(xy):
-        _, ax = empty_2d_ax()
-        for i, batch in enumerate(xy):
-            ax.plot(batch[:, 0], batch[:, 1], linewidth=4, color=colors[i])
-            ax.scatter(batch[0, 0], batch[0, 1], s=250, marker="^", color=colors[i])
-            ax.scatter(batch[-1, 0], batch[-1, 1], s=250, marker="X", color=colors[i])
+def _create_composite_input(desired_movement, options):
+    # desired movement represents the end result kinematic (say a curved reach)
+    # The composite inputs that generate that movement will be manually crafted and tested
 
-    exp_path = f"results/{model_name}/compositionality/composite_rule_inputs/kinematics"
-    load_name = f"checkpoints/{model_name}/composite_rule_inputs.pkl"
-    trial_data = load_pickle(load_name)
-    colors = plt.cm.inferno(np.linspace(0, 1, 8))
+    # Get the rule input for each env with correct batch size
+    env_rule_inputs = {}
+    for env in env_dict:
+        effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+        env_tmp = env_dict[env](effector=effector)
+        _, _ = env_tmp.reset(testing=True, options=options)
+        env_rule_inputs[env] = env_tmp.rule_input
 
-    for env in env_dict_ext:
-        plot_env_kinematics(trial_data[env]["xy"])
-        save_fig(os.path.join(exp_path, f"extension_kinematics_{env}"), eps=True)
+    # Desired movement can be any movement except reach and reachback
+    if desired_movement == "Reach":
+        reach_inp = torch.zeros(size=(options["batch_size"], 1))
+        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
 
+        optimizer = optim.Adam([clkcr_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
 
-def composite_input_init(model_name):
-    exp_path = f"results/{model_name}/compositionality/composite_rule_inputs/init_cond"
-    load_name = f"checkpoints/{model_name}/composite_rule_inputs.pkl"
-    trial_data = load_pickle(load_name)
-    colors_envs = plt.cm.tab10(np.linspace(0, 1, len(env_dict)))
+    # Desired movement can be any movement except reach and reachback
+    if desired_movement == "ClkCurvedReach":
+        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        clkcr_inp = torch.zeros(size=(options["batch_size"], 1))
+        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
 
-    env_hs, _ = _get_mean_act(
-        model_name, "delay", "extension", delay_cond=2, batch_size=32
+        optimizer = optim.Adam([reach_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
+
+    elif desired_movement == "CClkCurvedReach":
+        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        cclkcr_inp = torch.zeros(size=(options["batch_size"], 1))
+        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
+
+        optimizer = optim.Adam([reach_inp, clkcr_inp, sin_inp, invsin_inp], lr=1e-1)
+
+    elif desired_movement == "Sinusoid":
+        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        sin_inp = torch.zeros(size=(options["batch_size"], 1))
+        invsin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
+
+        optimizer = optim.Adam([reach_inp, clkcr_inp, cclkcr_inp, invsin_inp], lr=1e-1)
+
+    elif desired_movement == "InvSinusoid":
+        reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        clkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        sin_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
+        invsin_inp = torch.zeros(size=(options["batch_size"], 1))
+        other_inputs = torch.zeros(size=(options["batch_size"], 5))
+
+        optimizer = optim.Adam([reach_inp, clkcr_inp, cclkcr_inp, sin_inp], lr=1e-1)
+    else:
+        raise ValueError
+
+    return (
+        reach_inp,
+        clkcr_inp,
+        cclkcr_inp,
+        sin_inp,
+        invsin_inp,
+        other_inputs,
+        optimizer,
     )
-    env_hs = np.concatenate(env_hs)
-    epoch_pca = PCA(n_components=3)
-    epoch_pca.fit(env_hs)
-
-    _, ax = ax_3d_no_grid()
-    for e, env in enumerate(env_dict_ext):
-        delay_start, delay_end = delay_bounds(trial_data)
-
-        composite_h = trial_data[env]["h"][:, delay_start:delay_end]
-        composite_h = composite_h.mean(dim=0)
-
-        all_data_for_min = np.concatenate([composite_h, env_hs])
-        red_all_data_for_min = epoch_pca.transform(all_data_for_min)
-        min_val = np.min(red_all_data_for_min)
-
-        reduced_baseline = epoch_pca.transform(env_hs)
-        ax.scatter(
-            reduced_baseline[e, 0],
-            reduced_baseline[e, 1],
-            reduced_baseline[e, 2],
-            s=200,
-            marker="o",
-            color=colors_envs[e],
-        )
-        ax.scatter(
-            reduced_baseline[e, 0],
-            reduced_baseline[e, 1],
-            min_val,
-            s=200,
-            marker="o",
-            color=colors_envs[e],
-            alpha=0.10,
-        )
-
-        reduced_composite = epoch_pca.transform(composite_h)
-        ax.scatter(
-            reduced_composite[-1, 0],
-            reduced_composite[-1, 1],
-            min_val,
-            s=200,
-            marker="X",
-            color=colors_envs[e],
-            alpha=0.10,
-        )
-        ax.scatter(
-            reduced_composite[-1, 0],
-            reduced_composite[-1, 1],
-            reduced_composite[-1, 2],
-            s=200,
-            marker="X",
-            color=colors_envs[e],
-        )
-    save_fig(os.path.join(exp_path, "extension_init_all"), eps=True)
 
 
-def composite_input_loss(model_name):
-    exp_path = f"results/{model_name}/compositionality/composite_rule_inputs/losses"
-    load_name = f"checkpoints/{model_name}/composite_rule_inputs.pkl"
-    trial_data = load_pickle(load_name)
-    colors_envs = plt.cm.tab10(np.linspace(0, 1, len(env_dict)))
+def composite_input_optimization(
+    model_path,
+    model_name,
+    options,
+    env,
+    desired_movement,
+    noise=False,
+    noise_act=0.1,
+    noise_inp=0.01,
+    add_new_rule_inputs=False,
+    num_new_inputs=10,
+    num_iters=250,
+):
+    """
+    Runs a test episode in the specified environment using a trained RNN or GRU policy.
 
-    _, ax = standard_2d_ax()
-    for e, env in enumerate(trial_data):
-        loss = trial_data[env]["test_loss"]
-        ax.plot(loss, linewidth=4, color=colors_envs[e], alpha=0.75)
-    save_fig(os.path.join(exp_path, "optimization_losses"), eps=True)
+    Parameters:
+    -----------
+    model_path : str
+        Path to the trained model directory.
+    model_file : str
+        Filename of the model checkpoint.
+    options : dict
+        Dictionary of environment and test configuration options (e.g., batch size).
+    env : callable
+        Environment constructor. Should accept an effector keyword argument.
+    stim : torch.Tensor, optional
+        Tensor to silence or stimulate specific hidden units. Default is None.
+    feedback_mask : torch.Tensor, optional
+        Mask to ablate parts of the observation vector. Default is None.
+    noise : bool, optional
+        Whether to inject noise into the network. Default is False.
+    noise_act : float, optional
+        Standard deviation of noise added to activations. Default is 0.1.
+    noise_inp : float, optional
+        Standard deviation of noise added to inputs. Default is 0.01.
+    add_new_rule_inputs : bool, optional
+        Whether to add additional rule inputs to the RNN. Default is False.
+    num_new_inputs : int, optional
+        Number of new rule inputs to add if `add_new_rule_inputs` is True. Default is 10.
 
+    Returns:
+    --------
+    trial_data : dict
+        Dictionary containing recorded trajectories and internal states for the episode, including:
+            - 'h', 'x': hidden and internal states
+            - 'action': actions taken by the model
+            - 'obs': observations received
+            - 'xy', 'tg': fingertip positions and target positions
+            - 'muscle_acts': muscle activations
+            - 'epoch_bounds': dictionary from the environment
+    """
 
-def run_composite_input_optimization(model_name):
-    model_path = f"checkpoints/{model_name}"
-    model_file = f"{model_name}.pth"
-    options = {
-        "batch_size": 8,
-        "reach_conds": np.arange(0, 32, 4),
-        "speed_cond": 9,
-        "custom_delay": 150,
-    }
+    test = Test(
+        model_path,
+        model_name,
+        noise_level_act=noise_act,
+        noise_level_inp=noise_inp,
+        device="cpu",
+        add_new_rule_inputs=add_new_rule_inputs,
+        num_new_inputs=num_new_inputs,
+    )
+    test.batch_size = options["batch_size"]
+    policy = test.policy
 
-    all_trial_data = {}
-    for env in env_dict_ext:
-        trial_data = composite_input_optimization(
-            model_path, model_file, options, env_dict_ext[env], env
-        )
-        all_trial_data[env] = trial_data
+    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+    inp1, inp2, inp3, inp4, inp5, inp6, optimizer = _create_composite_input(
+        desired_movement, options
+    )
 
-    # Save all information of inputs across envs
-    save_name = "composite_rule_inputs.pkl"
-    fname = os.path.join(model_path, save_name)
-    with open(fname, "wb") as f:
-        pickle.dump(all_trial_data, f)
+    best_trial_data = {}
+    best_loss = np.inf
+    training_losses = []
+
+    print(f"\nBeginning optimization for {desired_movement}")
+
+    for it in range(num_iters):
+        # initialize batch
+        x = torch.zeros(size=(test.batch_size, test.hid_size))
+        h = torch.zeros(size=(test.batch_size, test.hid_size))
+
+        env_tmp = env(effector=effector)
+        obs, info = env_tmp.reset(testing=True, options=options)
+
+        terminated = False
+        trial_data = {}
+        timesteps = 0
+
+        trial_data["h"] = []
+        trial_data["x"] = []
+        trial_data["action"] = []
+        trial_data["muscle_acts"] = []
+        trial_data["obs"] = []
+        trial_data["xy"] = []
+        trial_data["tg"] = []
+
+        ep_t = 0
+        # simulate whole episode
+        while not terminated:
+            # Check if doing composite inputs
+            composite_inp = torch.cat([inp1, inp2, inp3, inp4, inp5, inp6], dim=1)
+            obs = _replace_rule_input(composite_inp, obs)
+
+            x, h, action = policy(obs, x, h, noise=noise)
+
+            # Take step in motornet environment
+            obs, _, terminated, info = env_tmp.step(timesteps, action=action)
+
+            timesteps += 1
+
+            # Save all information regarding episode step
+            trial_data["h"].append(h.unsqueeze(1))  # trajectories
+            trial_data["x"].append(x.unsqueeze(1))  # trajectories
+            trial_data["action"].append(action.unsqueeze(1))  # targets
+            trial_data["obs"].append(obs.unsqueeze(1))  # targets
+            trial_data["xy"].append(
+                info["states"]["fingertip"][:, None, :]
+            )  # trajectories
+            trial_data["tg"].append(info["goal"][:, None, :])  # targets
+            trial_data["muscle_acts"].append(
+                info["states"]["muscle"][:, 0].unsqueeze(1)
+            )
+
+            # small check just in case something goes wrong in here
+            ep_t += 1
+            if ep_t > 10000:
+                break
+
+        # Concatenate all data into single tensor
+        for key in trial_data:
+            trial_data[key] = torch.cat(trial_data[key], dim=1)
+
+        loss = MultitaskTrainer.l1_dist(
+            trial_data["xy"], trial_data["tg"]
+        )  # L1 loss on position
+        print(f"loss at iteration {it}: {loss.item()}")
+        training_losses.append(loss.item())
+
+        trial_data["rule_input"] = composite_inp.detach().clone()
+
+        if loss < best_loss:
+            best_trial_data = trial_data
+            best_loss = loss.item()
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    for key in trial_data:
+        best_trial_data[key] = best_trial_data[key].detach()
+    best_trial_data["epoch_bounds"] = env_tmp.epoch_bounds
+    best_trial_data["test_loss"] = training_losses
+
+    return best_trial_data
 
 
 def sequential_rule_inputs(model_name, extension, retraction):

@@ -1,13 +1,13 @@
 import numpy as np
 
-import sys from pathlib import Path
+import sys
+from pathlib import Path
 
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 from sklearn.decomposition import PCA
 
-from utils.jpca_util import ensure_datas_is_list, preprocess
 from utils.regression import skew_sym_regress
 
 __all__ = ["JPCA"]
@@ -18,6 +18,14 @@ class JPCA:
         assert num_jpcs % 2 == 0, "num_jpcs must be an even number."
         self.num_jpcs = num_jpcs
         self.jpcs = None
+
+    @staticmethod
+    def ensure_datas_is_list(f):
+        def wrapper(self, datas, **kwargs):
+            datas = [datas] if not isinstance(datas, list) else datas
+            return f(self, datas, **kwargs)
+
+        return wrapper
 
     def _calculate_jpcs(self, M):
         num_jpcs = self.num_jpcs
@@ -59,7 +67,7 @@ class JPCA:
             # Note that this is purely for aesthetics -- it does not change the
             # amount of variance captured by a given jPCA plane.
             basis = np.array([[1, 0], [0, 1]])
-            prep_states = np.row_stack([x[0, k : k + 2] for x in projected])
+            prep_states = np.vstack([x[0, k : k + 2] for x in projected])
             pca = PCA(n_components=2)
             pca = pca.fit(prep_states)
             rot = pca.components_
@@ -74,6 +82,7 @@ class JPCA:
             if np.max(np.abs(test_proj[:, 1])) > np.max(test_proj[:, 1]):
                 basis = -basis
 
+            assert self.jpcs is not None
             # Update jpc pair
             self.jpcs[:, k : k + 2] = self.jpcs[:, k : k + 2] @ basis
 
@@ -94,12 +103,6 @@ class JPCA:
         proj = datas @ self.jpcs
         var_capt = np.var(proj, axis=(0, 1))
         return [x for x in proj], var_capt
-
-    # def: np.var(x, axis):
-    #   mean = np.mean(x, axis=axis, keepdims=True)
-    #   x_bar = x - mean
-    #   sq_err = np.sum(x_bar**2, axis=axis)
-    #   return sq_err / x.shape[axis]
 
     @ensure_datas_is_list
     def fit(
@@ -157,7 +160,7 @@ class JPCA:
             tstart = 0
             tend = -1
 
-        processed_datas, full_data_var, pca_var_capt = preprocess(
+        processed_datas, full_data_var, pca_var_capt = self.preprocess(
             datas,
             times,
             tstart=tstart,
@@ -186,3 +189,87 @@ class JPCA:
         projected, jpca_var_capt = self.project(processed_datas)
 
         return (projected, full_data_var, pca_var_capt, jpca_var_capt)
+
+    def preprocess(
+        self,
+        datas,
+        times,
+        tstart=-50,
+        tend=150,
+        soft_normalize=5,
+        subtract_cc_mean=True,
+        pca=True,
+        num_pcs=6,
+    ):
+        """
+        Preprocess data for jPCA.
+
+        Args
+        ----
+            datas: List of trials, where each element of the list has shape Times x Neurons.
+                As an example, this might be the output of load_churchland_data()
+
+            times: List of times for the experiment. Typically, time zero corresponds
+                to a stimulus onset. This list is used for extracting the set of
+                data to be analyzed (see tstart and tend args).
+
+            tstart: Integer. Starting time for analysis. For example, if times is [-10, 0 , 10]
+                    and tstart=0, then the data returned by this function will start
+                    at index 1.
+
+            tend: Integer. Ending time for analysis.
+
+            soft_normalize: Float or Int. Constant used during soft-normalization preprocessing step.
+                            Adapted from original jPCA matlab code. Normalized firing rate is
+                            computed by dividing by the range of the unit across all conditions and times
+                            plus the soft_normalize constant: Y_{cij} = (max(Y_{:i:}) - min(Y_{:i:}) + C)
+                            where Y_{cij} is the cth condition, ith neuron, at the jth time bin.
+                            C is the constant provided by soft_normalize. Set C negative to skip the
+                            soft-normalizing step.
+
+            subtract_cc_mean: Boolean. Whether or not to subtract the mean across conditions. Default True.
+
+            pca: Boolean. True to perform PCA as a preprocessing step. Defaults to True.
+
+            num_pcs: Int. When pca=True, controls the number of PCs to use. Defaults to 6.
+
+        Returns
+        -------
+            data_list: List of arrays, each T x N. T will depend on the values
+                passed for tstart and tend. N will be equal to num_pcs if pca=True.
+                Otherwise the dimension of the data will remain unchanged.
+            full_data_variance: Float, variance of original dataset.
+            pca_variance_captured: Array, variance captured by each PC.
+                                   If pca=False, this is set to None.
+        """
+        datas = np.stack(datas, axis=0)
+        num_conditions, num_time_bins, num_units = datas.shape
+
+        if soft_normalize > 0:
+            fr_range = np.max(datas, axis=(0, 1)) - np.min(datas, axis=(0, 1))
+            datas /= fr_range + soft_normalize
+
+        if subtract_cc_mean:
+            cc_mean = np.mean(datas, axis=0, keepdims=True)
+            datas -= cc_mean
+
+        # For consistency with the original jPCA matlab code,
+        # we compute PCA using only the analyzed times.
+        idx_start = times[tstart]
+        idx_end = times[tend] + 1  # Add one so idx is inclusive
+        num_time_bins = idx_end - idx_start
+        datas = datas[:, idx_start:idx_end, :]
+
+        # Reshape to perform PCA on all trials at once.
+        X_full = np.concatenate(datas)
+        full_data_var = np.sum(np.var(X_full, axis=0))
+        pca_variance_captured = None
+
+        if pca:
+            pca = PCA(num_pcs)
+            datas = pca.fit_transform(X_full)
+            datas = datas.reshape(num_conditions, num_time_bins, num_pcs)
+            pca_variance_captured = pca.explained_variance_
+
+        data_list = [x for x in datas]
+        return data_list, full_data_var, pca_variance_captured

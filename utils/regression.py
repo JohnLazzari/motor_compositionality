@@ -61,4 +61,3 @@ def _reshape_vec2mat(h, N):
 def _reshape_mat2vec(M, N):
     upper_tri_indices = np.triu_indices(N, k=1)
     return M[upper_tri_indices]
-

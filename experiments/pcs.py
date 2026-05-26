@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 import matplotlib.pyplot as plt
 import config
 import tqdm as tqdm
-from utils.reduction_utils import plot_pca3d
+from utils.reduction_utils import plot_pca3d, plot_jpcs
 
 """ The functions here are currently doing pca on each environment then plotting, this may change
 """
@@ -52,19 +52,11 @@ def plot_motor_pca_speeds_movement(model_name):
 
 
 def plot_jpcs_delay(model_name):
-    _plot_jpcs(model_name, "delay")
+    plot_jpcs(model_name, "delay")
 
 
 def plot_jpcs_movement(model_name):
-    _plot_jpcs(model_name, "movement")
-
-
-def plot_all_task_trajectories_neural(model_name):
-    _plot_all_task_trajectories(model_name, "h")
-
-
-def plot_all_task_trajectories_muscle(model_name):
-    _plot_all_task_trajectories(model_name, "muscle_acts")
+    plot_jpcs(model_name, "movement")
 
 
 if __name__ == "__main__":
@@ -94,11 +86,6 @@ if __name__ == "__main__":
         plot_jpcs_delay(args.model_name)
     elif args.experiment == "plot_jpcs_movement":
         plot_jpcs_movement(args.model_name)
-
-    elif args.experiment == "plot_all_task_trajectories_neural":
-        plot_all_task_trajectories_neural(args.model_name)
-    elif args.experiment == "plot_all_task_trajectories_muscle":
-        plot_all_task_trajectories_muscle(args.model_name)
 
     else:
         raise ValueError("Experiment not in this file")

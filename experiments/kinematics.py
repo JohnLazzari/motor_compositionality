@@ -14,31 +14,36 @@ import matplotlib.pyplot as plt
 import numpy as np
 import config
 import tqdm as tqdm
-from utils.exp_utils import env_dict
+from utils.exp_utils import env_dict, extension_dict, retraction_dict
 from modules.test import Test
-from utils.plot_utils import save_fig
+from utils.plot_utils import save_fig, standard_2d_ax
 
 # Keep all the envs in case transfer to other envs in future
-from modules.envs.reach import Reach
-from modules.envs.clk_curved_reach import ClkCurvedReach
 from modules.envs.cclk_curved_reach import CClkCurvedReach
-from modules.envs.sinusoid import Sinusoid
-from modules.envs.inv_sinusoid import InvSinusoid
-from modules.envs.reach_back import ReachBack
-from modules.envs.clk_cycle import ClkCycle
 from modules.envs.cclk_cycle import CClkCycle
-from modules.envs.figure_eight import Figure8
-from modules.envs.inv_figure_eight import InvFigure8
 
 plt.rcParams.update({"font.size": 18})  # Sets default font size for all text
 
 
-def plot_kin_2d(tg, xy, color, linestyle="solid", alpha=0.75):
-    plt.plot(
+def plot_kin_2d(ax, tg, xy, color, linestyle="solid", alpha=0.75):
+    ax.plot(
         xy[:, 0], xy[:, 1], linewidth=4, linestyle=linestyle, alpha=alpha, color=color
     )
-    plt.scatter(xy[0, 0], xy[0, 1], s=150, marker="x", color=color)
-    plt.scatter(tg[0], tg[1], s=150, marker="^", color=color)
+    ax.scatter(xy[0, 0], xy[0, 1], s=150, marker="x", color=color)
+    ax.scatter(tg[0], tg[1], s=150, marker="^", color=color)
+
+
+def plot_1d(pos, env, color):
+    plt.plot(pos, linewidth=4, color=color)
+    if env in extension_dict:
+        plt.xlim([0, 150])
+    elif env in retraction_dict:
+        plt.xlim([0, 300])
+    else:
+        raise Exception
+    ax = plt.gca()
+    # Remove everything
+    ax.axis("off")
 
 
 def plot_task_kinematics(model_name):
@@ -56,10 +61,10 @@ def plot_task_kinematics(model_name):
 
     test = Test(model_path, model_name)
 
-    # Loop through each task
     for env in env_dict:
-        # Loop through each speed
         for speed in range(10):
+            _, ax = standard_2d_ax()
+
             options = {
                 "batch_size": 8,
                 "reach_conds": torch.arange(0, 32, 4),
@@ -69,26 +74,79 @@ def plot_task_kinematics(model_name):
 
             trial_data = test.trial(options, env_dict[env])
 
-            # Get kinematics and activity in a center out setting
-            # On random and delay
             colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0]))
 
             for i, (obs, xy) in enumerate(zip(trial_data["obs"], trial_data["xy"])):
                 plot_kin_2d(
+                    ax,
                     obs[trial_data["epoch_bounds"]["movement"][0], 12:14],
                     xy,
                     colors[i],
                 )
 
-            # Access current axes and hide top/right spines
-            plt.gca().spines["top"].set_visible(False)
-            plt.gca().spines["right"].set_visible(False)
             save_fig(
                 os.path.join(exp_path, "scatter", f"{env}_speed{speed}_kinematics"),
                 eps=True,
             )
 
 
+def plot_speed_kinematics(model_name):
+    """
+    Plot kinematics across speeds in the x and y plane separately
+
+    Args:
+        model_name (str): name of model to test on
+    """
+
+    model_path = f"checkpoints/{model_name}"
+    exp_path = os.path.join(
+        f"results/{model_name}/kinematics", "speeds", "speed_kinematics"
+    )
+
+    test = Test(model_path, model_name)
+
+    plt.rc("figure", figsize=(8, 4))
+
+    colors = plt.cm.Reds(np.linspace(0, 1, 10))
+
+    for env in env_dict:
+        for speed in range(10):
+            options = {
+                "batch_size": 16,
+                "reach_conds": torch.arange(0, 32, 2),
+                "speed_cond": speed,
+                "delay_cond": 1,
+            }
+            trial_data = test.trial(options, env_dict[env], noise=True)
+
+            start = trial_data["epoch_bounds"]["movement"][0]
+            end = trial_data["epoch_bounds"]["movement"][1]
+
+            x_pos = trial_data["xy"][0, start:end, 0]
+            y_pos = trial_data["xy"][0, start:end, 1]
+
+            # x pos
+            plot_1d(x_pos, env, colors[speed])
+            save_fig(
+                os.path.join(
+                    exp_path,
+                    f"{env}_x_kinematics_speed_{speed}",
+                ),
+                eps=True,
+            )
+
+            # y pos
+            plot_1d(y_pos, env, colors[speed])
+            save_fig(
+                os.path.join(
+                    exp_path,
+                    f"{env}_y_kinematics_speed_{speed}",
+                ),
+                eps=True,
+            )
+
+
+# TODO test this function
 def plot_task_kinematics_held_out_transfer(model_name):
     """
     This function plots the kinematics on a network that performs transfer learning
@@ -153,75 +211,6 @@ def plot_task_kinematics_held_out_transfer(model_name):
         plt.gca().spines["top"].set_visible(False)
         plt.gca().spines["right"].set_visible(False)
         save_fig(os.path.join(exp_path, "scatter", f"{env}_kinematics"), eps=True)
-
-
-def plot_speed_kinematics(model_name):
-    """This function will simply plot the target at each timestep for different orientations of the task
-        This is not for kinematics
-
-    Args:
-        config_path (_type_): _description_
-        model_path (_type_): _description_
-        model_file (_type_): _description_
-        exp_path (_type_): _description_
-    """
-
-    def plot_1d(pos, color):
-        plt.plot(pos, linewidth=4, color=color)
-        if e < 5:
-            plt.xlim([0, 150])
-        else:
-            plt.xlim([0, 300])
-        ax = plt.gca()
-        # Remove everything
-        ax.axis("off")
-
-    model_path = f"checkpoints/{model_name}"
-    exp_path = os.path.join(
-        f"results/{model_name}/kinematics", "speeds", "speed_kinematics"
-    )
-
-    test = Test(model_path, model_name)
-
-    plt.rc("figure", figsize=(8, 4))
-
-    colors = plt.cm.Reds(np.linspace(0, 1, 10))
-
-    for e, env in enumerate(env_dict):
-        for speed in range(10):
-            options = {
-                "batch_size": 16,
-                "reach_conds": torch.arange(0, 32, 2),
-                "speed_cond": speed,
-                "delay_cond": 1,
-            }
-            trial_data = test.trial(options, env_dict[env], noise=True)
-
-            start = trial_data["epoch_bounds"]["movement"][0]
-            end = trial_data["epoch_bounds"]["movement"][1]
-
-            x_pos = trial_data["xy"][0, start:end, 0]
-            y_pos = trial_data["xy"][0, start:end, 1]
-
-            # x pos
-            plot_1d(x_pos, colors[speed])
-            save_fig(
-                os.path.join(
-                    exp_path,
-                    f"{env}_x_kinematics_speed_{speed}",
-                ),
-                eps=True,
-            )
-
-            # y pos
-            plot_1d(y_pos, colors[speed])
-            save_fig(
-                os.path.join(
-                    exp_path,
-                    f"{env}_y_kinematics_speed_{speed}",
-                ),
-                eps=True,
-            )
 
 
 if __name__ == "__main__":
