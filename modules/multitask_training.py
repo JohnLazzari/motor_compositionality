@@ -111,6 +111,7 @@ class MultitaskTrainer:
         # create model path for saving model and hp
         create_dir(model_path)
 
+        # Save the training parameters from this training object
         save_pickle(f"{model_path}/mult_train.pkl", self)
         device = torch.device("cpu")
         effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
@@ -240,6 +241,7 @@ class MultitaskTrainer:
             env_losses[env_name].append(loss.item())
             total_losses.append(loss.item())
 
+            # saving losses
             if (batch % interval == 0) and (batch != 0):
                 print(
                     "Batch {}/{} Done, mean policy loss: {}".format(
@@ -251,6 +253,7 @@ class MultitaskTrainer:
                 save_pickle(os.path.join(model_path, "env_losses.pkl"), env_losses)
                 np.savetxt(os.path.join(model_path, "total_losses.txt"), total_losses)
 
+            # saving model
             if batch % self.save_iter == 0:
                 # Get test loss
                 test_loss_envs, test_loss = self.eval(policy)

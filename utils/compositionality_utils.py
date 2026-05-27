@@ -30,7 +30,6 @@ from utils.exp_utils import (
     angles_from_combinations,
     shapes_from_combinations,
     convert_motif_dict_to_list,
-    test_sequential_inputs,
     load_pickle,
 )
 from utils.manifold_utils import compute_vaf_ratio
@@ -49,6 +48,7 @@ import seaborn as sns
 from DSA import DSA
 import scipy
 from modules.test import Test
+from modules.multitask_training import MultitaskTrainer
 from utils.plot_utils import (
     save_fig,
     standard_2d_ax,
@@ -142,7 +142,7 @@ extension_retraction_tasks = list(
 )
 
 
-def _get_mean_act(
+def get_mean_act(
     model_name,
     epoch,
     movement_type,
@@ -246,7 +246,7 @@ def epoch_pcs(
     exp_path = f"results/{model_name}/compositionality/pcs"
     create_dir(exp_path)
 
-    env_hs, envs_to_use = _get_mean_act(
+    env_hs, envs_to_use = get_mean_act(
         model_name, epoch, movement_type, add_new_rule_inputs=add_new_rule_inputs
     )
 
@@ -862,7 +862,7 @@ def task_similarity_classification(model_name, load_file_name, save_name):
 
 
 def _replace_rule_input(composite_inp, obs):
-    B, N = obs.shape
+    B, _ = obs.shape
     # This will not account for greater than two
     if composite_inp.dim() < 2:
         composite_inp = composite_inp.repeat(B, 1)
@@ -873,14 +873,6 @@ def _replace_rule_input(composite_inp, obs):
 def _create_composite_input(desired_movement, options):
     # desired movement represents the end result kinematic (say a curved reach)
     # The composite inputs that generate that movement will be manually crafted and tested
-
-    # Get the rule input for each env with correct batch size
-    env_rule_inputs = {}
-    for env in env_dict:
-        effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-        env_tmp = env_dict[env](effector=effector)
-        _, _ = env_tmp.reset(testing=True, options=options)
-        env_rule_inputs[env] = env_tmp.rule_input
 
     # Desired movement can be any movement except reach and reachback
     if desired_movement == "Reach":
@@ -894,7 +886,7 @@ def _create_composite_input(desired_movement, options):
         optimizer = optim.Adam([clkcr_inp, cclkcr_inp, sin_inp, invsin_inp], lr=1e-1)
 
     # Desired movement can be any movement except reach and reachback
-    if desired_movement == "ClkCurvedReach":
+    elif desired_movement == "ClkCurvedReach":
         reach_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
         clkcr_inp = torch.zeros(size=(options["batch_size"], 1))
         cclkcr_inp = nn.Parameter(torch.ones(size=(options["batch_size"], 1)))
@@ -1073,7 +1065,7 @@ def composite_input_optimization(
             # small check just in case something goes wrong in here
             ep_t += 1
             if ep_t > 10000:
-                break
+                terminated = True
 
         # Concatenate all data into single tensor
         for key in trial_data:
@@ -1103,9 +1095,140 @@ def composite_input_optimization(
     return best_trial_data
 
 
-def sequential_rule_inputs(model_name, extension, retraction):
+def test_sequential_inputs(
+    model_path,
+    model_name,
+    options,
+    extension,
+    retraction,
+    noise=False,
+    noise_act=0.1,
+    noise_inp=0.01,
+):
+    """
+    Runs a test episode in the specified environment using a trained RNN or GRU policy.
+
+    Parameters:
+    -----------
+    model_path : str
+        Path to the trained model directory.
+    model_file : str
+        Filename of the model checkpoint.
+    options : dict
+        Dictionary of environment and test configuration options (e.g., batch size).
+    env : callable
+        Environment constructor. Should accept an effector keyword argument.
+    stim : torch.Tensor, optional
+        Tensor to silence or stimulate specific hidden units. Default is None.
+    feedback_mask : torch.Tensor, optional
+        Mask to ablate parts of the observation vector. Default is None.
+    noise : bool, optional
+        Whether to inject noise into the network. Default is False.
+    noise_act : float, optional
+        Standard deviation of noise added to activations. Default is 0.1.
+    noise_inp : float, optional
+        Standard deviation of noise added to inputs. Default is 0.01.
+    add_new_rule_inputs : bool, optional
+        Whether to add additional rule inputs to the RNN. Default is False.
+    num_new_inputs : int, optional
+        Number of new rule inputs to add if `add_new_rule_inputs` is True. Default is 10.
+
+    Returns:
+    --------
+    trial_data : dict
+        Dictionary containing recorded trajectories and internal states for the episode, including:
+            - 'h', 'x': hidden and internal states
+            - 'action': actions taken by the model
+            - 'obs': observations received
+            - 'xy', 'tg': fingertip positions and target positions
+            - 'muscle_acts': muscle activations
+            - 'epoch_bounds': dictionary from the environment
+    """
+
+    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
+    extension_env = extension(effector=effector)
+    retraction_env = retraction(effector=effector)
+
+    test = Test(
+        model_path,
+        model_name,
+        noise_level_act=noise_act,
+        noise_level_inp=noise_inp,
+        device="cpu",
+    )
+    test.batch_size = options["batch_size"]
+    policy = test.policy
+
+    # initialize batch
+    x = torch.zeros(size=(test.batch_size, test.hid_size))
+    h = torch.zeros(size=(test.batch_size, test.hid_size))
+
+    obs, info = retraction_env.reset(testing=True, options=options)
+    _, _ = extension_env.reset(testing=True, options=options)
+
+    extension_rule_input = extension_env.rule_input
+    retraction_rule_input = retraction_env.rule_input
+
+    middle_movement = int(
+        (
+            retraction_env.epoch_bounds["movement"][1]
+            + retraction_env.epoch_bounds["movement"][0]
+        )
+        / 2
+    )
+    terminated = False
+    trial_data = {}
+    timesteps = 0
+
+    trial_data["h"] = []
+    trial_data["x"] = []
+    trial_data["action"] = []
+    trial_data["muscle_acts"] = []
+    trial_data["obs"] = []
+    trial_data["xy"] = []
+    trial_data["tg"] = []
+
+    # simulate whole episode
+    while not terminated:  # will run until `max_ep_duration` is reached
+        with torch.no_grad():
+            if timesteps < middle_movement:
+                obs = _replace_rule_input(extension_rule_input, obs)
+
+            if timesteps >= middle_movement:
+                obs = _replace_rule_input(retraction_rule_input, obs)
+
+            x, h, action = policy(obs, x, h, noise=noise)
+
+            # Take step in motornet environment
+            obs, _, terminated, info = retraction_env.step(timesteps, action=action)
+
+        timesteps += 1
+
+        # Save all information regarding episode step
+        trial_data["h"].append(h.unsqueeze(1))  # trajectories
+        trial_data["x"].append(x.unsqueeze(1))  # trajectories
+        trial_data["action"].append(action.unsqueeze(1))  # targets
+        trial_data["obs"].append(obs.unsqueeze(1))  # targets
+        trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
+        trial_data["tg"].append(info["goal"][:, None, :])  # targets
+        trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
+
+    # Concatenate all data into single tensor
+    for key in trial_data:
+        trial_data[key] = torch.cat(trial_data[key], dim=1)
+
+    loss = MultitaskTrainer.l1_dist(
+        trial_data["xy"], trial_data["tg"]
+    )  # L1 loss on position
+    trial_data["test_loss"] = loss
+
+    trial_data["epoch_bounds"] = retraction_env.epoch_bounds
+
+    return trial_data
+
+
+def sequential_input_kinematics(model_name, extension, retraction):
     model_path = f"checkpoints/{model_name}"
-    model_file = f"{model_name}.pth"
     exp_path = (
         f"results/{model_name}/compositionality/sequential_rule_inputs/kinematics"
     )
@@ -1114,6 +1237,7 @@ def sequential_rule_inputs(model_name, extension, retraction):
         "batch_size": 4,
         "reach_conds": np.arange(0, 32, 8),
         "speed_cond": 5,
+        "deterministic": True,
         "delay_cond": 2,
     }
 
@@ -1121,12 +1245,12 @@ def sequential_rule_inputs(model_name, extension, retraction):
     retraction_env = env_dict[retraction]
 
     trial_data = test_sequential_inputs(
-        model_path, model_file, options, extension_env, retraction_env
+        model_path, model_name, options, extension_env, retraction_env
     )
     kinematics = trial_data["xy"]
     middle_movement = get_middle_movement(trial_data)
 
-    fig, ax = empty_2d_ax()
+    _, ax = empty_2d_ax()
     for cond in range(kinematics.shape[0]):
         ax.plot(
             kinematics[cond, :middle_movement, 0],

@@ -86,8 +86,8 @@ def delay_bounds(trial_data):
     """
     Helper function to get delay epoch bounds
     """
-    delay_beg = trial_data["epoch_bounds"]["movement"][0]
-    delay_end = trial_data["epoch_bounds"]["movement"][1]
+    delay_beg = trial_data["epoch_bounds"]["delay"][0]
+    delay_end = trial_data["epoch_bounds"]["delay"][1]
     return delay_beg, delay_end
 
 
@@ -120,146 +120,6 @@ def unique_pairs_dict(labels, data):
         )
 
     return combinations
-
-
-def test_sequential_inputs(
-    model_path,
-    model_file,
-    options,
-    extension,
-    retraction,
-    noise=False,
-    noise_act=0.1,
-    noise_inp=0.01,
-):
-    """
-    Runs a test episode in the specified environment using a trained RNN or GRU policy.
-
-    Parameters:
-    -----------
-    model_path : str
-        Path to the trained model directory.
-    model_file : str
-        Filename of the model checkpoint.
-    options : dict
-        Dictionary of environment and test configuration options (e.g., batch size).
-    env : callable
-        Environment constructor. Should accept an effector keyword argument.
-    stim : torch.Tensor, optional
-        Tensor to silence or stimulate specific hidden units. Default is None.
-    feedback_mask : torch.Tensor, optional
-        Mask to ablate parts of the observation vector. Default is None.
-    noise : bool, optional
-        Whether to inject noise into the network. Default is False.
-    noise_act : float, optional
-        Standard deviation of noise added to activations. Default is 0.1.
-    noise_inp : float, optional
-        Standard deviation of noise added to inputs. Default is 0.01.
-    add_new_rule_inputs : bool, optional
-        Whether to add additional rule inputs to the RNN. Default is False.
-    num_new_inputs : int, optional
-        Number of new rule inputs to add if `add_new_rule_inputs` is True. Default is 10.
-
-    Returns:
-    --------
-    trial_data : dict
-        Dictionary containing recorded trajectories and internal states for the episode, including:
-            - 'h', 'x': hidden and internal states
-            - 'action': actions taken by the model
-            - 'obs': observations received
-            - 'xy', 'tg': fingertip positions and target positions
-            - 'muscle_acts': muscle activations
-            - 'epoch_bounds': dictionary from the environment
-    """
-
-    device = "cpu"
-    effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-    extension_env = extension(effector=effector)
-    retraction_env = retraction(effector=effector)
-
-    hp = load_hp(model_path)
-    hp = hp.copy()
-    hp["batch_size"] = options["batch_size"]
-
-    policy = load_model(model_path, model_file, hp, noise_act, noise_inp, device)
-
-    # initialize batch
-    x = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
-    h = torch.zeros(size=(hp["batch_size"], hp["hid_size"]))
-
-    obs, info = retraction_env.reset(testing=True, options=options)
-    _, _ = extension_env.reset(testing=True, options=options)
-
-    extension_rule_input = extension_env.rule_input
-    retraction_rule_input = retraction_env.rule_input
-
-    middle_movement = int(
-        (
-            retraction_env.epoch_bounds["movement"][1]
-            + retraction_env.epoch_bounds["movement"][0]
-        )
-        / 2
-    )
-    terminated = False
-    trial_data = {}
-    timesteps = 0
-
-    trial_data["h"] = []
-    trial_data["x"] = []
-    trial_data["action"] = []
-    trial_data["muscle_acts"] = []
-    trial_data["obs"] = []
-    trial_data["xy"] = []
-    trial_data["tg"] = []
-
-    # simulate whole episode
-    while not terminated:  # will run until `max_ep_duration` is reached
-        with torch.no_grad():
-            if timesteps < middle_movement:
-                obs = _replace_rule_input(extension_rule_input, obs)
-
-            if timesteps == middle_movement:
-                for t in range(2):
-                    obs = _replace_rule_input(retraction_rule_input, obs)
-                    x, h, _ = policy(obs, x, h, noise=noise)
-
-            x, h, action = policy(obs, x, h, noise=noise)
-
-            # Take step in motornet environment
-            obs, reward, terminated, info = retraction_env.step(
-                timesteps, action=action
-            )
-
-        timesteps += 1
-
-        # Save all information regarding episode step
-        trial_data["h"].append(h.unsqueeze(1))  # trajectories
-        trial_data["x"].append(x.unsqueeze(1))  # trajectories
-        trial_data["action"].append(action.unsqueeze(1))  # targets
-        trial_data["obs"].append(obs.unsqueeze(1))  # targets
-        trial_data["xy"].append(info["states"]["fingertip"][:, None, :])  # trajectories
-        trial_data["tg"].append(info["goal"][:, None, :])  # targets
-        trial_data["muscle_acts"].append(info["states"]["muscle"][:, 0].unsqueeze(1))
-
-    # Concatenate all data into single tensor
-    for key in trial_data:
-        trial_data[key] = torch.cat(trial_data[key], dim=1)
-
-    loss = l1_dist(trial_data["xy"], trial_data["tg"])  # L1 loss on position
-    trial_data["test_loss"] = loss
-
-    trial_data["epoch_bounds"] = retraction_env.epoch_bounds
-
-    return trial_data
-
-
-def _replace_rule_input(composite_inp, obs):
-    B, N = obs.shape
-    # This will not account for greater than two
-    if composite_inp.dim() < 2:
-        composite_inp = composite_inp.repeat(B, 1)
-    obs_new_rule = torch.cat([composite_inp, obs[:, 10:]], dim=1)
-    return obs_new_rule
 
 
 def get_middle_movement(trial_data):

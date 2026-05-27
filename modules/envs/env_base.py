@@ -19,9 +19,7 @@ class MotornetEnv(env.Environment):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.obs_noise[: self.skeleton.space_dim] = [
-            0.0
-        ] * self.skeleton.space_dim  # target info is noiseless
+        self.obs_noise = [0.0] * 28  # hardcoding size for now
         self.hidden_goal = None
         # timestep info
         self.dt = 0.01

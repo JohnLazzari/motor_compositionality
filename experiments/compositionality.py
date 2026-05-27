@@ -10,6 +10,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from utils.compositionality_utils import (
+    get_mean_act,
     dsa_similarity_matrix,
     epoch_pcs,
     gather_all_traj_metrics,
@@ -17,9 +18,23 @@ from utils.compositionality_utils import (
     convert_motif_dict_to_list,
     plot_metric_scatter,
     composite_input_optimization,
+    sequential_input_kinematics,
 )
-from utils.plot_utils import save_fig, standard_2d_ax
-from utils.exp_utils import load_pickle, env_dict, extension_dict, retraction_dict
+from utils.plot_utils import (
+    save_fig,
+    standard_2d_ax,
+    no_ticks_2d_ax,
+    empty_2d_ax,
+    ax_3d_no_grid,
+)
+from utils.exp_utils import (
+    load_pickle,
+    env_dict,
+    extension_dict,
+    retraction_dict,
+    delay_bounds,
+)
+from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import numpy as np
 import config
@@ -254,7 +269,31 @@ def plot_metric_scatter_m(model_name):
 #################### Composite Input Experiments ###########################3
 
 
-def composite_input_loss(model_name):
+def run_composite_input_optimization(model_name):
+    model_path = f"checkpoints/{model_name}"
+    options = {
+        "batch_size": 8,
+        "reach_conds": np.arange(0, 32, 4),
+        "speed_cond": 9,
+        "deterministic": True,
+        "custom_delay": 150,
+    }
+
+    all_trial_data = {}
+    for env in extension_dict:
+        trial_data = composite_input_optimization(
+            model_path, model_name, options, extension_dict[env], env
+        )
+        all_trial_data[env] = trial_data
+
+    # Save all information of inputs across envs
+    save_name = "composite_rule_inputs.pkl"
+    fname = os.path.join(model_path, save_name)
+    with open(fname, "wb") as f:
+        pickle.dump(all_trial_data, f)
+
+
+def plot_composite_input_loss(model_name):
     exp_path = f"results/{model_name}/compositionality/composite_rule_inputs/losses"
     load_name = f"checkpoints/{model_name}/composite_rule_inputs.pkl"
     trial_data = load_pickle(load_name)
@@ -267,32 +306,8 @@ def composite_input_loss(model_name):
     save_fig(os.path.join(exp_path, "optimization_losses"), eps=True)
 
 
-def run_composite_input_optimization(model_name):
-    model_path = f"checkpoints/{model_name}"
-    model_file = f"{model_name}.pth"
-    options = {
-        "batch_size": 8,
-        "reach_conds": np.arange(0, 32, 4),
-        "speed_cond": 9,
-        "custom_delay": 150,
-    }
-
-    all_trial_data = {}
-    for env in extension_dict:
-        trial_data = composite_input_optimization(
-            model_path, model_file, options, extension_dict[env], env
-        )
-        all_trial_data[env] = trial_data
-
-    # Save all information of inputs across envs
-    save_name = "composite_rule_inputs.pkl"
-    fname = os.path.join(model_path, save_name)
-    with open(fname, "wb") as f:
-        pickle.dump(all_trial_data, f)
-
-
 # Get the loss from every composite input on each environment and get the heat map
-def composite_rule_input_heat_map(model_name):
+def plot_composite_input_heat_map(model_name):
     exp_path = f"results/{model_name}/compositionality/composite_rule_inputs/heat_map"
     load_name = f"checkpoints/{model_name}/composite_rule_inputs.pkl"
     trial_data = load_pickle(load_name)
@@ -307,7 +322,7 @@ def composite_rule_input_heat_map(model_name):
 
 
 # Get the loss from every composite input on each environment and get the heat map
-def composite_rule_input_kinematics(model_name):
+def plot_composite_input_kinematics(model_name):
     def plot_env_kinematics(xy):
         _, ax = empty_2d_ax()
         for i, batch in enumerate(xy):
@@ -320,18 +335,18 @@ def composite_rule_input_kinematics(model_name):
     trial_data = load_pickle(load_name)
     colors = plt.cm.inferno(np.linspace(0, 1, 8))
 
-    for env in env_dict_ext:
+    for env in extension_dict:
         plot_env_kinematics(trial_data[env]["xy"])
         save_fig(os.path.join(exp_path, f"extension_kinematics_{env}"), eps=True)
 
 
-def composite_input_init(model_name):
+def plot_composite_input_init(model_name):
     exp_path = f"results/{model_name}/compositionality/composite_rule_inputs/init_cond"
     load_name = f"checkpoints/{model_name}/composite_rule_inputs.pkl"
     trial_data = load_pickle(load_name)
     colors_envs = plt.cm.tab10(np.linspace(0, 1, len(env_dict)))
 
-    env_hs, _ = _get_mean_act(
+    env_hs, _ = get_mean_act(
         model_name, "delay", "extension", delay_cond=2, batch_size=32
     )
     env_hs = np.concatenate(env_hs)
@@ -339,8 +354,8 @@ def composite_input_init(model_name):
     epoch_pca.fit(env_hs)
 
     _, ax = ax_3d_no_grid()
-    for e, env in enumerate(env_dict_ext):
-        delay_start, delay_end = delay_bounds(trial_data)
+    for e, env in enumerate(extension_dict):
+        delay_start, delay_end = delay_bounds(trial_data[env])
 
         composite_h = trial_data[env]["h"][:, delay_start:delay_end]
         composite_h = composite_h.mean(dim=0)
@@ -389,10 +404,13 @@ def composite_input_init(model_name):
     save_fig(os.path.join(exp_path, "extension_init_all"), eps=True)
 
 
-def run_all_sequential_rule_inputs(model_name):
+#################### Sequential input experiments ####################
+
+
+def run_all_sequential_input_kinematics(model_name):
     for ext in extension_dict:
         for ret in retraction_dict:
-            _sequential_rule_inputs(model_name, ext, ret)
+            sequential_input_kinematics(model_name, ext, ret)
 
 
 if __name__ == "__main__":
@@ -420,6 +438,24 @@ if __name__ == "__main__":
         retraction_pcs_extension_retraction(args.model_name)
     elif args.experiment == "hold_pcs_extension_retraction":
         hold_pcs_extension_retraction(args.model_name)
+
+    # composite input optimization experiments
+
+    elif args.experiment == "run_composite_input_optimization":
+        run_composite_input_optimization(args.model_name)
+    elif args.experiment == "plot_composite_input_loss":
+        plot_composite_input_loss(args.model_name)
+    elif args.experiment == "plot_composite_input_heat_map":
+        plot_composite_input_heat_map(args.model_name)
+    elif args.experiment == "plot_composite_input_kinematics":
+        plot_composite_input_kinematics(args.model_name)
+    elif args.experiment == "plot_composite_input_init":
+        plot_composite_input_init(args.model_name)
+
+    # sequential rule input experiments
+
+    elif args.experiment == "run_all_sequential_input_kinematics":
+        run_all_sequential_input_kinematics(args.model_name)
 
     elif args.experiment == "neural_two_task_pcs_sinusoid_fullcircleclk":
         neural_two_task_pcs_sinusoid_fullcircleclk(args.model_name)
