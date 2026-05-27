@@ -12,14 +12,23 @@ import torch
 import os
 from utils.plot_utils import standard_2d_ax, save_fig
 from utils.exp_utils import mov_bounds, delay_bounds, unique_pairs
+from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 import numpy as np
 import tqdm as tqdm
 import itertools
 from sklearn.decomposition import PCA
 from sklearn.cross_decomposition import CCA
-from utils.exp_utils import env_dict
 from modules.test import Test
+from utils.exp_utils import (
+    env_dict,
+    pvalues,
+    unique_pairs_dict,
+    distances_from_combinations,
+    angles_from_combinations,
+    shapes_from_combinations,
+    convert_motif_dict_to_list,
+)
 
 plt.rcParams.update({"font.size": 18})  # Sets default font size for all text
 
@@ -529,3 +538,353 @@ def network_muscle_mode_similarity(model_name):
     ax.set_xticks(bin_edges)
 
     save_fig(os.path.join(exp_path, "network_muscle_mode_hist"), eps=True)
+
+
+######################################################
+#            Task Metric Experiments                 #
+######################################################
+
+
+def create_metric_scatter(
+    combinations,
+    combination_colors,
+    metric1,
+    metric2,
+    exp_path,
+    metric1_name,
+    metric2_name,
+):
+    _, ax = standard_2d_ax()
+
+    task_metric1 = convert_motif_dict_to_list(
+        [key for key in combinations.keys()], metric1
+    )
+    task_metric2 = convert_motif_dict_to_list(
+        [key for key in combinations.keys()], metric2
+    )
+
+    metric1_list = np.array(task_metric1).reshape((-1, 1))
+    metric2_list = np.array(task_metric2).reshape((-1, 1))
+
+    regression = LinearRegression()
+    regression.fit(metric1_list, metric2_list)
+    print(
+        f"R^2 {metric1_name} to {metric2_name}: ",
+        regression.score(metric1_list, metric2_list),
+    )
+    x = np.linspace(0, max(metric1_list))
+    ax.plot(x, regression.coef_ * x + regression.intercept_, color="black")
+
+    for c, combination in enumerate(combinations[:-1]):
+        task_metric1_comb = convert_motif_dict_to_list(combination, metric1)
+        task_metric2_comb = convert_motif_dict_to_list(combination, metric2)
+        ax.scatter(
+            task_metric1_comb,
+            task_metric2_comb,
+            s=100,
+            alpha=0.25,
+            color=combination_colors[c],
+        )
+    save_fig(
+        os.path.join(exp_path, "movement", f"{metric1_name} vs {metric2_name}"),
+        eps=True,
+    )
+
+
+def _plot_metric_bar(combinations, metric, exp_path, metric_name, combination_colors):
+    _, ax = standard_2d_ax()
+
+    combination_means = []
+    combination_stds = []
+    combination_data = {}
+    for combination in combinations:
+        task_metric = convert_motif_dict_to_list(combinations[combination], metric)
+        combination_data[combination] = task_metric
+        combination_means.append(sum(task_metric) / len(task_metric))
+        combination_stds.append(np.std(task_metric, ddof=1))
+
+    # Convert values to list
+    data_values = list(combination_data.values())
+
+    ax.axhline(combination_means[-1], color="dimgrey", linestyle="dashed")
+    parts = ax.violinplot(data_values[:-1], showmeans=True)
+
+    # Custom colors
+    for i, pc in enumerate(parts["bodies"]):
+        pc.set_facecolor(combination_colors[i])
+        pc.set_edgecolor("black")
+        pc.set_alpha(0.7)
+        pc.set_linewidth(1.2)
+    parts["cbars"].set_edgecolor("black")
+    parts["cmins"].set_edgecolor("black")
+    parts["cmaxes"].set_edgecolor("black")
+    parts["cmeans"].set_color("black")
+
+    if "angles" in metric_name:
+        plt.yticks([0, 1.5])
+    elif "shapes" in metric_name:
+        plt.yticks([0, 1])
+    plt.xticks([])
+    save_fig(os.path.join(exp_path, "movement", metric_name), eps=True)
+
+    combination_list = list(combination_data.keys())
+    pvalues(combination_list, combination_data, metric_name)
+
+
+def _gather_env_pairs_from_trial(model_name, system, options):
+    model_path = f"checkpoints/{model_name}"
+    test = Test(model_path, model_name)
+
+    assert system == "h" or system == "muscle"
+
+    trial_data = {}
+    for env in env_dict:
+        trial_data = test.trial(options, env_dict[env])
+        mov_beg, mov_end = mov_bounds(trial_data)
+
+        if env in full_movements:
+            halfway = int((mov_beg + mov_end) / 2)
+            trial_data[env + "1"] = trial_data[system][:, mov_beg:halfway]
+            trial_data[env + "2"] = trial_data[system][:, halfway:mov_end]
+        else:
+            trial_data[env] = trial_data[system][:, mov_beg:mov_end]
+
+    # Get all unique pairs of unit activity across tasks
+    combination_labels = list(itertools.combinations(trial_data.keys(), 2))
+    combinations = unique_pairs_dict(combination_labels, trial_data)
+    return trial_data, combinations, combination_labels
+
+
+def gather_all_traj_metrics(model_name, system):
+    if system != "h" or system != "muscle":
+        raise ValueError
+
+    options = {
+        "batch_size": 32,
+        "reach_conds": np.tile(np.arange(0, 32, 1), int(32 / 32)),
+        "speed_cond": 5,
+    }
+
+    _, combinations, combination_labels = _gather_env_pairs_from_trial(
+        model_name, system, options
+    )
+
+    print("Computing Distances...")
+    distances = distances_from_combinations(combinations, options["batch_size"])
+    print("Computing Angles...")
+    angles = angles_from_combinations(combinations, options["batch_size"])
+    print("Computing Shapes...")
+    shapes = shapes_from_combinations(combinations, options["batch_size"])
+
+    all_subsets = {
+        "subset_tasks": subset_tasks,
+        "retraction_tasks": retraction_tasks,
+        "extension_tasks": extension_tasks,
+        "extension_retraction_tasks": extension_retraction_tasks,
+        "all_tasks": combination_labels,
+    }
+
+    all_subset_colors = ["purple", "pink", "blue", "orange", "grey"]
+
+    all_metrics = {
+        "distances": distances,
+        "angles": angles,
+        "shapes": shapes,
+    }
+
+    return all_subsets, all_subset_colors, all_metrics
+
+
+def trajectory_metric_bar_plot(model_name, system):
+    """
+    Utilize metrics such as angle, distance, and disparity between trajectories to see
+    how different task trajectories are aligned to one another
+
+    This function will plot all available metrics for both the muscles and network
+    """
+
+    exp_path = f"results/{model_name}/compositionality/alignment"
+
+    all_subsets, all_subset_colors, all_metrics = gather_all_traj_metrics(
+        model_name, system
+    )
+
+    # Make each bar plot
+    for metric in all_metrics:
+        _plot_metric_bar(
+            all_subsets,
+            all_metrics[metric],
+            exp_path,
+            metric,
+            all_subset_colors,
+        )
+
+
+def plot_metric_scatter(model_name, system):
+    exp_path = f"results/{model_name}/compositionality/alignment"
+
+    all_subsets, all_subset_colors, all_metrics = gather_all_traj_metrics(
+        model_name, system
+    )
+
+    for idx1, metric1 in enumerate(all_metrics):
+        for idx2, metric2 in enumerate(all_metrics):
+            if idx1 != idx2:
+                create_metric_scatter(
+                    all_subsets,
+                    all_subset_colors,
+                    all_metrics[metric1],
+                    all_metrics[metric2],
+                    exp_path,
+                    metric1,
+                    metric2,
+                )
+
+
+def _get_vaf_combination(combination_labels, data, mode, comp_range):
+    # Initialize the full pc dict
+    all_vaf_list_means = []
+    all_vaf_list_stds = []
+
+    condition_tuple_dict = {}
+    condition_label_dict = {}
+
+    for combination in combination_labels:
+        if combination not in data:
+            combination = (combination[1], combination[0])
+        for c, (task1_condition, task2_condition) in enumerate(
+            zip(data[combination][0], data[combination][1])
+        ):
+            if c not in condition_tuple_dict:
+                condition_tuple_dict[c] = []
+                condition_label_dict[c] = []
+            # This should return a list of the variance explained for each pc
+            condition_tuple_dict[c].append((task1_condition, task2_condition))
+            condition_label_dict[c].append(combination)
+
+    for pc in range(1, comp_range):
+        condition_vaf_list = []
+        for condition in condition_tuple_dict.values():
+            # This should return a list of the variance explained for each pc
+            ratio_list = compute_vaf_ratio(
+                condition, mode=mode, num_comps=pc, control=False
+            )
+            condition_vaf_list.extend(ratio_list)
+        all_vaf_list_means.append(np.array(condition_vaf_list).mean())
+        all_vaf_list_stds.append(np.array(condition_vaf_list).std())
+
+    return np.array(all_vaf_list_means), np.array(all_vaf_list_stds)
+
+
+def task_vaf_ratio(model_name):
+    exp_path = f"results/{model_name}/compositionality/task_vaf_ratio"
+    options = {
+        "batch_size": 32,
+        "reach_conds": np.tile(np.arange(0, 32, 1), int(32 / 32)),
+        "speed_cond": 5,
+    }
+    _, combinations_h, combination_labels = _gather_env_pairs_from_trial(
+        model_name, "h", options
+    )
+    _, combinations_muscle, _ = _gather_env_pairs_from_trial(
+        model_name, "muscle", options
+    )
+
+    all_subsets = {
+        "extension_tasks": extension_tasks,
+        "retraction_tasks": retraction_tasks,
+        "subset_tasks": subset_tasks,
+        "extension_retraction_tasks": extension_retraction_tasks,
+    }
+
+    all_subsets_colors = {
+        "extension_tasks": "blue",
+        "retraction_tasks": "pink",
+        "subset_tasks": "purple",
+        "extension_retraction_tasks": "orange",
+    }
+
+    comp_range = 11
+
+    # Plotting vaf for different number of pc components neural
+    subset_pc_dict_means = {}
+    subset_pc_dict_stds = {}
+    for subset in all_subsets:
+        subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = (
+            _get_vaf_combination(all_subsets[subset], combinations_h, "h", comp_range)
+        )
+    all_task_pc_means, all_task_pc_stds = _get_vaf_combination(
+        combination_labels, combinations_h, "h", comp_range
+    )
+
+    _, ax = standard_2d_ax()
+    x = np.arange(1, comp_range)
+    for subset in subset_pc_dict_means:
+        ax.plot(
+            x,
+            subset_pc_dict_means[subset],
+            linewidth=4,
+            alpha=0.75,
+            color=all_subsets_colors[subset],
+        )
+        ax.fill_between(
+            x,
+            subset_pc_dict_means[subset] - subset_pc_dict_stds[subset],
+            subset_pc_dict_means[subset] + subset_pc_dict_stds[subset],
+            color=all_subsets_colors[subset],
+            alpha=0.25,
+        )
+    ax.plot(x, all_task_pc_means, linewidth=4, alpha=0.75, color="grey")
+    ax.fill_between(
+        x,
+        all_task_pc_means - all_task_pc_stds,
+        all_task_pc_means + all_task_pc_stds,
+        color="grey",
+        alpha=0.25,
+    )
+
+    comp_range = 7
+    ax.set_ylim((0.0, 1.1))
+    save_fig(os.path.join(exp_path, "vaf_ratio_neural"), eps=True)
+
+    # Plotting vaf for different number of pc components muscle
+    subset_pc_dict_means = {}
+    subset_pc_dict_stds = {}
+    for subset in all_subsets:
+        subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = (
+            _get_vaf_combination(
+                all_subsets[subset], combinations_muscle, "muscle_acts", comp_range
+            )
+        )
+    all_task_pc_means, all_task_pc_stds = _get_vaf_combination(
+        combination_labels, combinations_muscle, "muscle_acts", comp_range
+    )
+
+    _, ax = standard_2d_ax()
+    x = np.arange(1, comp_range)
+    for subset in subset_pc_dict_means:
+        ax.plot(
+            x,
+            subset_pc_dict_means[subset],
+            linewidth=4,
+            alpha=0.75,
+            color=all_subsets_colors[subset],
+        )
+        ax.fill_between(
+            x,
+            subset_pc_dict_means[subset] - subset_pc_dict_stds[subset],
+            subset_pc_dict_means[subset] + subset_pc_dict_stds[subset],
+            color=all_subsets_colors[subset],
+            alpha=0.25,
+        )
+    ax.plot(x, all_task_pc_means, linewidth=4, alpha=0.75, color="grey")
+    ax.fill_between(
+        x,
+        all_task_pc_means - all_task_pc_stds,
+        all_task_pc_means + all_task_pc_stds,
+        color="grey",
+        alpha=0.25,
+    )
+
+    ax.set_ylim((0, 1.1))
+    save_fig(os.path.join(exp_path, "vaf_ratio_muscle"), eps=True)

@@ -1,2 +1,2 @@
 model_name=rnn256_softplus
-experiment=neural_vaf_ratio_task_cond
+experiment=run_all_muscle_epoch_pcs

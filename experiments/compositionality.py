@@ -45,126 +45,258 @@ plt.rcParams.update({"font.size": 18})  # Sets default font size for all text
 ################### PCA Axis Experiments ################################
 
 
-def stable_pcs_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+def stable_pcs_neural_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
     epoch_pcs(
         model_name,
         "stable",
         "extension",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def delay_pcs_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+def delay_pcs_neural_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
     epoch_pcs(
         model_name,
         "delay",
         "extension",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def movement_pcs_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+def movement_pcs_neural_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
     epoch_pcs(
         model_name,
         "extension",
         "extension",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def hold_pcs_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+def hold_pcs_neural_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
     epoch_pcs(
         model_name,
         "hold",
         "extension",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def stable_pcs_extension_retraction(
+def stable_pcs_neural_extension_retraction(
     model_name, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "stable",
         "extension_retraction",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def delay_pcs_extension_retraction(
+def delay_pcs_neural_extension_retraction(
     model_name, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "delay",
         "extension_retraction",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def extension_pcs_extension_retraction(
+def extension_pcs_neural_extension_retraction(
     model_name, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "extension",
         "extension_retraction",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def retraction_pcs_extension_retraction(
+def retraction_pcs_neural_extension_retraction(
     model_name, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "retraction",
         "extension_retraction",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def hold_pcs_extension_retraction(model_name, add_new_rule_inputs=False, plot_3d=False):
+def hold_pcs_neural_extension_retraction(
+    model_name, add_new_rule_inputs=False, plot_3d=False
+):
     epoch_pcs(
         model_name,
         "hold",
         "extension_retraction",
+        "h",
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def run_all_epoch_pcs(model_name):
-    stable_pcs_extension(model_name)
-    delay_pcs_extension(model_name)
-    movement_pcs_extension(model_name)
-    hold_pcs_extension(model_name)
-    stable_pcs_extension_retraction(model_name)
-    delay_pcs_extension_retraction(model_name)
-    extension_pcs_extension_retraction(model_name)
-    retraction_pcs_extension_retraction(model_name)
-    hold_pcs_extension_retraction(model_name)
+def run_all_neural_epoch_pcs(model_name):
+    stable_pcs_neural_extension(model_name)
+    delay_pcs_neural_extension(model_name)
+    movement_pcs_neural_extension(model_name)
+    hold_pcs_neural_extension(model_name)
+    stable_pcs_neural_extension_retraction(model_name)
+    delay_pcs_neural_extension_retraction(model_name)
+    extension_pcs_neural_extension_retraction(model_name)
+    retraction_pcs_neural_extension_retraction(model_name)
+    hold_pcs_neural_extension_retraction(model_name)
 
 
-def run_all_epoch_pcs_transfer(model_name):
-    stable_pcs_extension(model_name, add_new_rule_inputs=True)
-    delay_pcs_extension(model_name, add_new_rule_inputs=True)
-    movement_pcs_extension(model_name, add_new_rule_inputs=True)
-    hold_pcs_extension(model_name, add_new_rule_inputs=True)
-    stable_pcs_extension_retraction(model_name, add_new_rule_inputs=True)
-    delay_pcs_extension_retraction(model_name, add_new_rule_inputs=True)
-    extension_pcs_extension_retraction(model_name, add_new_rule_inputs=True)
-    retraction_pcs_extension_retraction(model_name, add_new_rule_inputs=True)
-    hold_pcs_extension_retraction(model_name, add_new_rule_inputs=True)
+def run_all_neural_epoch_pcs_transfer(model_name):
+    stable_pcs_neural_extension(model_name, add_new_rule_inputs=True)
+    delay_pcs_neural_extension(model_name, add_new_rule_inputs=True)
+    movement_pcs_neural_extension(model_name, add_new_rule_inputs=True)
+    hold_pcs_neural_extension(model_name, add_new_rule_inputs=True)
+    stable_pcs_neural_extension_retraction(model_name, add_new_rule_inputs=True)
+    delay_pcs_neural_extension_retraction(model_name, add_new_rule_inputs=True)
+    extension_pcs_neural_extension_retraction(model_name, add_new_rule_inputs=True)
+    retraction_pcs_neural_extension_retraction(model_name, add_new_rule_inputs=True)
+    hold_pcs_neural_extension_retraction(model_name, add_new_rule_inputs=True)
+
+
+def stable_pcs_muscle_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+    epoch_pcs(
+        model_name,
+        "stable",
+        "extension",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def delay_pcs_muscle_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+    epoch_pcs(
+        model_name,
+        "delay",
+        "extension",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def movement_pcs_muscle_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+    epoch_pcs(
+        model_name,
+        "extension",
+        "extension",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def hold_pcs_muscle_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+    epoch_pcs(
+        model_name,
+        "hold",
+        "extension",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def stable_pcs_muscle_extension_retraction(
+    model_name, add_new_rule_inputs=False, plot_3d=False
+):
+    epoch_pcs(
+        model_name,
+        "stable",
+        "extension_retraction",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def delay_pcs_muscle_extension_retraction(
+    model_name, add_new_rule_inputs=False, plot_3d=False
+):
+    epoch_pcs(
+        model_name,
+        "delay",
+        "extension_retraction",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def extension_pcs_muscle_extension_retraction(
+    model_name, add_new_rule_inputs=False, plot_3d=False
+):
+    epoch_pcs(
+        model_name,
+        "extension",
+        "extension_retraction",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def retraction_pcs_muscle_extension_retraction(
+    model_name, add_new_rule_inputs=False, plot_3d=False
+):
+    epoch_pcs(
+        model_name,
+        "retraction",
+        "extension_retraction",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def hold_pcs_muscle_extension_retraction(
+    model_name, add_new_rule_inputs=False, plot_3d=False
+):
+    epoch_pcs(
+        model_name,
+        "hold",
+        "extension_retraction",
+        "muscle_acts",
+        add_new_rule_inputs=add_new_rule_inputs,
+        plot_3d=plot_3d,
+    )
+
+
+def run_all_muscle_epoch_pcs(model_name):
+    stable_pcs_muscle_extension(model_name)
+    delay_pcs_muscle_extension(model_name)
+    movement_pcs_muscle_extension(model_name)
+    hold_pcs_muscle_extension(model_name)
+    stable_pcs_muscle_extension_retraction(model_name)
+    delay_pcs_muscle_extension_retraction(model_name)
+    extension_pcs_muscle_extension_retraction(model_name)
+    retraction_pcs_muscle_extension_retraction(model_name)
+    hold_pcs_muscle_extension_retraction(model_name)
 
 
 ################### Task Metric Experiments ################################
@@ -419,25 +551,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Epoch pcs
-    if args.experiment == "stable_pcs_extension":
-        stable_pcs_extension(args.model_name)
-    elif args.experiment == "delay_pcs_extension":
-        delay_pcs_extension(args.model_name)
-    elif args.experiment == "movement_pcs_extension":
-        movement_pcs_extension(args.model_name)
-    elif args.experiment == "hold_pcs_extension":
-        hold_pcs_extension(args.model_name)
-
-    elif args.experiment == "stable_pcs_extension_retraction":
-        stable_pcs_extension_retraction(args.model_name)
-    elif args.experiment == "delay_pcs_extension_retraction":
-        delay_pcs_extension_retraction(args.model_name)
-    elif args.experiment == "extension_pcs_extension_retraction":
-        extension_pcs_extension_retraction(args.model_name)
-    elif args.experiment == "retraction_pcs_extension_retraction":
-        retraction_pcs_extension_retraction(args.model_name)
-    elif args.experiment == "hold_pcs_extension_retraction":
-        hold_pcs_extension_retraction(args.model_name)
+    if args.experiment == "run_all_neural_epoch_pcs":
+        run_all_neural_epoch_pcs(args.model_name)
+    elif args.experiment == "run_all_muscle_epoch_pcs":
+        run_all_muscle_epoch_pcs(args.model_name)
 
     # composite input optimization experiments
 
@@ -466,8 +583,6 @@ if __name__ == "__main__":
     elif args.experiment == "muscle_two_task_pcs_halfcircleclk_halfcirclecclk":
         muscle_two_task_pcs_halfcircleclk_halfcirclecclk(args.model_name)
 
-    elif args.experiment == "run_all_epoch_pcs":
-        run_all_epoch_pcs(args.model_name)
     elif args.experiment == "run_all_epoch_pcs_transfer":
         run_all_epoch_pcs_transfer(args.model_name)
     elif args.experiment == "run_all_epoch_lda":
