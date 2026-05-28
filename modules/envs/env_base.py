@@ -25,6 +25,10 @@ class MotornetEnv(env.Environment):
         self.dt = 0.01
         self.go_cue = None
         self.initial_pos = None
+        self.stable_time = 25
+        self.hold_time = 25
+        # Initialize empty 3d trajectory
+        self.traj = th.empty(size=(1, 1, 1))
 
     def get_obs(
         self, t, action=None, deterministic: bool = False
@@ -62,7 +66,7 @@ class MotornetEnv(env.Environment):
         t,
         action: th.Tensor | np.ndarray,
         **kwargs,
-    ) -> tuple[th.Tensor | np.ndarray, bool, bool, dict[str, Any]]:
+    ) -> tuple[th.Tensor | np.ndarray, None | np.ndarray, bool, dict[str, Any]]:
         """
         Perform one simulation step. This method is likely to be overwritten by any subclass to implement user-defined
         computations, such as reward value calculation for reinforcement learning, custom truncation or termination
@@ -106,7 +110,8 @@ class MotornetEnv(env.Environment):
 
         """
             Each stage of the trial is given here
-            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods simply repeat the first and last hand positions
+            Trajectory only specifies the movement kinematics, the stable, delay, and hold periods 
+            simply repeat the first and last hand positions
         """
         if t < self.epoch_bounds["delay"][1]:
             self.hidden_goal = self.traj[:, 0, :]
@@ -139,6 +144,238 @@ class MotornetEnv(env.Environment):
         else:
             delay_time = random.choice(delay_times)
         return delay_time
+
+    def _reset_trial_options(self, seed, options):
+        """Parse reset options, reset the effector, and return common values."""
+        self._set_generator(seed=seed)
+        options = {} if options is None else options
+        batch_size: int = options.get("batch_size", 1)
+        joint_state = self._initial_joint_state(batch_size)
+        deterministic: bool = options.get("deterministic", False)
+        self.effector.reset(
+            options={"batch_size": batch_size, "joint_state": joint_state}
+        )
+        return (
+            options,
+            batch_size,
+            options.get("reach_conds", None),
+            options.get("speed_cond", None),
+            options.get("delay_cond", None),
+            options.get("custom_delay", None),
+            deterministic,
+            joint_state,
+        )
+
+    def _initial_joint_state(self, batch_size):
+        """Return the default repeated initial joint state used by all tasks."""
+        return (
+            th.tensor(
+                [
+                    self.effector.pos_range_bound[0] * 0.5
+                    + self.effector.pos_upper_bound[0]
+                    + 0.1,
+                    self.effector.pos_range_bound[1] * 0.5
+                    + self.effector.pos_upper_bound[1]
+                    + 0.5,
+                    0,
+                    0,
+                ]
+            )
+            .unsqueeze(0)
+            .repeat(batch_size, 1)
+        )
+
+    def _configure_timing(
+        self,
+        batch_size,
+        testing,
+        speed_cond,
+        delay_cond,
+        custom_delay,
+        train_movement_times,
+        test_movement_times,
+        speed_denominator,
+        set_half_movement=False,
+    ):
+        """Configure epoch bounds, speed scalar, and episode duration."""
+        self.delay_time = self.choose_delay(delay_cond, custom_delay)
+
+        movement_times = test_movement_times if testing else train_movement_times
+        if speed_cond is None:
+            self.movement_time = random.choice(movement_times)
+        else:
+            self.movement_time = movement_times[speed_cond]
+
+        if set_half_movement:
+            self.half_movement_time = int(self.movement_time / 2)
+
+        self.epoch_bounds = {
+            "stable": (0, self.stable_time),
+            "delay": (self.stable_time, self.stable_time + self.delay_time),
+            "movement": (
+                self.stable_time + self.delay_time,
+                self.stable_time + self.delay_time + self.movement_time,
+            ),
+            "hold": (
+                self.stable_time + self.delay_time + self.movement_time,
+                self.stable_time
+                + self.delay_time
+                + self.movement_time
+                + self.hold_time,
+            ),
+        }
+
+        speed_scale = 1 - (self.movement_time / speed_denominator)
+        self.speed_scalar = th.cat(
+            [
+                th.zeros(size=(batch_size, self.epoch_bounds["stable"][1], 1)),
+                speed_scale
+                * th.ones(
+                    size=(
+                        batch_size,
+                        self.epoch_bounds["hold"][1] - self.epoch_bounds["stable"][1],
+                        1,
+                    )
+                ),
+            ],
+            dim=1,
+        )
+        self.max_ep_duration = self.epoch_bounds["hold"][1] - 1
+
+    def _set_static_inputs(self, batch_size, rule_index):
+        """Set the go cue and one-hot rule input for a reset."""
+        self.go_cue = th.cat(
+            [
+                th.zeros(size=(batch_size, self.epoch_bounds["delay"][1], 1)),
+                th.ones(
+                    size=(
+                        batch_size,
+                        self.epoch_bounds["hold"][1] - self.epoch_bounds["movement"][0],
+                        1,
+                    )
+                ),
+            ],
+            dim=1,
+        )
+        self.rule_input = th.zeros(size=(batch_size, 10))
+        self.rule_input[:, rule_index] = 1
+
+    def _fingertip_from_joint_state(self, joint_state):
+        """Convert a joint state to the fingertip position used as trajectory origin."""
+        return self.joint2cartesian(joint_state).chunk(2, dim=-1)[0]
+
+    def _direction_angles(self, testing):
+        """Return the direction grid used for train or test resets."""
+        if testing:
+            return th.linspace(0, 2 * np.pi, 33)[:-1]
+        return th.linspace(0, 2 * np.pi, 9)[:-1]
+
+    def _condition_indices(self, reach_conds, num_conditions, batch_size):
+        """Return condition indices from explicit options or random sampling."""
+        if reach_conds is None:
+            return th.randint(0, num_conditions, (batch_size,))
+        if isinstance(reach_conds, (int, float)):
+            return th.tensor([reach_conds])
+        if isinstance(reach_conds, (th.Tensor, np.ndarray)):
+            return reach_conds
+        raise TypeError
+
+    def _unit_circle_points(self, angles):
+        """Return unit-circle xy points for a tensor of angles."""
+        return th.stack([th.cos(angles), th.sin(angles)], dim=1)
+
+    def _arc_points(self, start_angle, end_angle, movement_time):
+        """Return scaled arc trajectory points between two angles."""
+        traj_points = th.linspace(start_angle, end_angle, movement_time)
+        points = self._unit_circle_points(traj_points)
+        return (points + th.tensor([[1, 0]])) * 0.25 * 0.5
+
+    def _sinusoid_points(self, movement_time, sign=1):
+        """Return scaled sinusoidal trajectory points."""
+        x_points = th.linspace(0, 1, movement_time)
+        y_points = sign * th.sin(th.linspace(0, 2 * np.pi, movement_time))
+        return th.stack([x_points, y_points], dim=1) * 0.25 * th.tensor([1, 0.5])
+
+    def _figure_eight_points(self, half_movement_time, sign=1):
+        """Return scaled figure-eight trajectory points."""
+        x_points_forward = th.linspace(0, 1, half_movement_time)
+        y_points_forward = sign * th.sin(th.linspace(0, 2 * np.pi, half_movement_time))
+
+        x_points_back = th.linspace(1, 0, half_movement_time)
+        y_points_back = -sign * th.sin(th.linspace(2 * np.pi, 0, half_movement_time))
+
+        points_forward = (
+            th.stack([x_points_forward, y_points_forward], dim=1)
+            * 0.25
+            * th.tensor([1, 0.5])
+        )
+        points_back = (
+            th.stack([x_points_back, y_points_back], dim=1) * 0.25 * th.tensor([1, 0.5])
+        )
+        return th.cat([points_forward, points_back], dim=0)
+
+    def _rotated_trajectory(self, points, fingertip, batch_size, reach_conds, testing):
+        """Rotate points according to condition choices and center them on fingertip."""
+        rot_angle = self._direction_angles(testing)
+        rotated_points = th.zeros(size=(batch_size, points.shape[0], 2))
+        point_idx = self._condition_indices(reach_conds, rot_angle.size(0), batch_size)
+
+        for i, theta in enumerate(rot_angle[point_idx]):
+            cos_theta = np.cos(theta)
+            sin_theta = np.sin(theta)
+            rotation = th.tensor([[cos_theta, -sin_theta], [sin_theta, cos_theta]])
+            rotated_points[i] = (rotation @ points.T).T
+
+        return rotated_points + fingertip[:, None, :]
+
+    def _line_trajectory(self, start, end, steps, batch_size):
+        """Return a batched straight-line trajectory from start to end."""
+        weights = th.linspace(0, 1, steps).repeat(batch_size, 1)
+        x_points = start[:, None, 0] + weights * (end[:, None, 0] - start[:, None, 0])
+        y_points = start[:, None, 1] + weights * (end[:, None, 1] - start[:, None, 1])
+        return th.stack([x_points, y_points], dim=-1)
+
+    def _set_visual_input(self, batch_size, target):
+        """Set visual input from a stable zero period and repeated target."""
+        if target.dim() == 2:
+            target = target.unsqueeze(1)
+        self.vis_inp = th.cat(
+            [
+                th.zeros(
+                    size=(
+                        batch_size,
+                        self.epoch_bounds["stable"][1],
+                        self.traj.shape[-1],
+                    )
+                ),
+                target.repeat(
+                    1, self.epoch_bounds["hold"][1] - self.epoch_bounds["delay"][0], 1
+                ),
+            ],
+            dim=1,
+        )
+
+    def _finalize_reset(self, batch_size, deterministic):
+        """Initialize observation buffers and return the reset observation/info."""
+        action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
+
+        self.obs_buffer["proprioception"] = [self.get_proprioception()] * len(
+            self.obs_buffer["proprioception"]
+        )
+        self.obs_buffer["vision"] = [self.get_vision()] * len(self.obs_buffer["vision"])
+        self.obs_buffer["action"] = [action] * self.action_frame_stacking
+
+        action = action if self.differentiable else self.detach(action)
+        obs = self.get_obs(0, deterministic=deterministic)
+        info = {
+            "states": self._maybe_detach_states(),
+            "action": action,
+            "noisy action": action,
+            "goal": self.hidden_goal
+            if self.differentiable
+            else self.detach(self.hidden_goal),
+        }
+        return obs, info
 
     def reset(
         self,

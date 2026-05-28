@@ -22,6 +22,11 @@ from sklearn.cross_decomposition import CCA
 from modules.test import Test
 from utils.exp_utils import (
     env_dict,
+    retraction_dict,
+    subset_tasks,
+    retraction_tasks,
+    extension_tasks,
+    extension_retraction_tasks,
     pvalues,
     unique_pairs_dict,
     distances_from_combinations,
@@ -554,6 +559,12 @@ def create_metric_scatter(
     metric1_name,
     metric2_name,
 ):
+    """Create and save a scatter plot comparing two trajectory metrics.
+
+    The function converts motif-pair metric dictionaries into aligned lists,
+    fits a simple linear regression between the two metrics, plots the
+    regression line, and saves a scatter plot grouped by task-combination color.
+    """
     _, ax = standard_2d_ax()
 
     task_metric1 = convert_motif_dict_to_list(
@@ -592,6 +603,7 @@ def create_metric_scatter(
 
 
 def _plot_metric_bar(combinations, metric, exp_path, metric_name, combination_colors):
+    """Create and save a violin plot for one trajectory metric across subsets."""
     _, ax = standard_2d_ax()
 
     combination_means = []
@@ -632,6 +644,11 @@ def _plot_metric_bar(combinations, metric, exp_path, metric_name, combination_co
 
 
 def _gather_env_pairs_from_trial(model_name, system, options):
+    """Collect movement activity and pairwise task combinations for one model.
+
+    Retraction tasks are split into first-half and second-half movement segments
+    before all pairwise combinations are generated.
+    """
     model_path = f"checkpoints/{model_name}"
     test = Test(model_path, model_name)
 
@@ -642,7 +659,7 @@ def _gather_env_pairs_from_trial(model_name, system, options):
         trial_data = test.trial(options, env_dict[env])
         mov_beg, mov_end = mov_bounds(trial_data)
 
-        if env in full_movements:
+        if env in retraction_dict:
             halfway = int((mov_beg + mov_end) / 2)
             trial_data[env + "1"] = trial_data[system][:, mov_beg:halfway]
             trial_data[env + "2"] = trial_data[system][:, halfway:mov_end]
@@ -656,6 +673,7 @@ def _gather_env_pairs_from_trial(model_name, system, options):
 
 
 def gather_all_traj_metrics(model_name, system):
+    """Compute distance, angle, and shape metrics for all task-pair subsets."""
     if system != "h" or system != "muscle":
         raise ValueError
 
@@ -721,6 +739,7 @@ def trajectory_metric_bar_plot(model_name, system):
 
 
 def plot_metric_scatter(model_name, system):
+    """Create scatter plots for every pair of computed trajectory metrics."""
     exp_path = f"results/{model_name}/compositionality/alignment"
 
     all_subsets, all_subset_colors, all_metrics = gather_all_traj_metrics(
@@ -741,7 +760,8 @@ def plot_metric_scatter(model_name, system):
                 )
 
 
-def _get_vaf_combination(combination_labels, data, mode, comp_range):
+def _get_vaf_combination(combination_labels, data, mode, hid_size, comp_range):
+    """Compute mean and standard deviation of VAF ratios across PC counts."""
     # Initialize the full pc dict
     all_vaf_list_means = []
     all_vaf_list_stds = []
@@ -767,7 +787,7 @@ def _get_vaf_combination(combination_labels, data, mode, comp_range):
         for condition in condition_tuple_dict.values():
             # This should return a list of the variance explained for each pc
             ratio_list = compute_vaf_ratio(
-                condition, mode=mode, num_comps=pc, control=False
+                condition, mode, hid_size, num_comps=pc, control=False
             )
             condition_vaf_list.extend(ratio_list)
         all_vaf_list_means.append(np.array(condition_vaf_list).mean())
@@ -776,11 +796,78 @@ def _get_vaf_combination(combination_labels, data, mode, comp_range):
     return np.array(all_vaf_list_means), np.array(all_vaf_list_stds)
 
 
+def _compute_subset_vaf_curves(
+    all_subsets, combination_labels, combinations, mode, hid_size, comp_range
+):
+    """Compute VAF-ratio curves for each subset and for all task pairs."""
+    subset_means = {}
+    subset_stds = {}
+
+    for subset in all_subsets:
+        subset_means[subset], subset_stds[subset] = _get_vaf_combination(
+            all_subsets[subset], combinations, mode, hid_size, comp_range
+        )
+
+    all_task_means, all_task_stds = _get_vaf_combination(
+        combination_labels, combinations, mode, hid_size, comp_range
+    )
+
+    return subset_means, subset_stds, all_task_means, all_task_stds
+
+
+def _plot_vaf_curves(
+    subset_means,
+    subset_stds,
+    all_task_means,
+    all_task_stds,
+    subset_colors,
+    comp_range,
+    save_path,
+):
+    """Plot subset and all-task VAF-ratio curves and save the figure."""
+    _, ax = standard_2d_ax()
+    x = np.arange(1, comp_range)
+
+    for subset in subset_means:
+        ax.plot(
+            x,
+            subset_means[subset],
+            linewidth=4,
+            alpha=0.75,
+            color=subset_colors[subset],
+        )
+        ax.fill_between(
+            x,
+            subset_means[subset] - subset_stds[subset],
+            subset_means[subset] + subset_stds[subset],
+            color=subset_colors[subset],
+            alpha=0.25,
+        )
+
+    ax.plot(x, all_task_means, linewidth=4, alpha=0.75, color="grey")
+    ax.fill_between(
+        x,
+        all_task_means - all_task_stds,
+        all_task_means + all_task_stds,
+        color="grey",
+        alpha=0.25,
+    )
+    ax.set_ylim((0.0, 1.1))
+    save_fig(save_path, eps=True)
+
+
 def task_vaf_ratio(model_name):
+    """Plot task VAF-ratio curves for neural and muscle activity subsets."""
     exp_path = f"results/{model_name}/compositionality/task_vaf_ratio"
+
+    # this is just to get the hid_size
+    model_path = f"checkpoints/{model_name}"
+    test = Test(model_path, model_name)
+
     options = {
         "batch_size": 32,
         "reach_conds": np.tile(np.arange(0, 32, 1), int(32 / 32)),
+        "deterministic": True,
         "speed_cond": 5,
     }
     _, combinations_h, combination_labels = _gather_env_pairs_from_trial(
@@ -804,87 +891,28 @@ def task_vaf_ratio(model_name):
         "extension_retraction_tasks": "orange",
     }
 
-    comp_range = 11
+    analyses = [
+        ("h", combinations_h, 11, "vaf_ratio_neural"),
+        ("muscle_acts", combinations_muscle, 7, "vaf_ratio_muscle"),
+    ]
 
-    # Plotting vaf for different number of pc components neural
-    subset_pc_dict_means = {}
-    subset_pc_dict_stds = {}
-    for subset in all_subsets:
-        subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = (
-            _get_vaf_combination(all_subsets[subset], combinations_h, "h", comp_range)
-        )
-    all_task_pc_means, all_task_pc_stds = _get_vaf_combination(
-        combination_labels, combinations_h, "h", comp_range
-    )
-
-    _, ax = standard_2d_ax()
-    x = np.arange(1, comp_range)
-    for subset in subset_pc_dict_means:
-        ax.plot(
-            x,
-            subset_pc_dict_means[subset],
-            linewidth=4,
-            alpha=0.75,
-            color=all_subsets_colors[subset],
-        )
-        ax.fill_between(
-            x,
-            subset_pc_dict_means[subset] - subset_pc_dict_stds[subset],
-            subset_pc_dict_means[subset] + subset_pc_dict_stds[subset],
-            color=all_subsets_colors[subset],
-            alpha=0.25,
-        )
-    ax.plot(x, all_task_pc_means, linewidth=4, alpha=0.75, color="grey")
-    ax.fill_between(
-        x,
-        all_task_pc_means - all_task_pc_stds,
-        all_task_pc_means + all_task_pc_stds,
-        color="grey",
-        alpha=0.25,
-    )
-
-    comp_range = 7
-    ax.set_ylim((0.0, 1.1))
-    save_fig(os.path.join(exp_path, "vaf_ratio_neural"), eps=True)
-
-    # Plotting vaf for different number of pc components muscle
-    subset_pc_dict_means = {}
-    subset_pc_dict_stds = {}
-    for subset in all_subsets:
-        subset_pc_dict_means[subset], subset_pc_dict_stds[subset] = (
-            _get_vaf_combination(
-                all_subsets[subset], combinations_muscle, "muscle_acts", comp_range
+    for mode, combinations, comp_range, save_name in analyses:
+        subset_means, subset_stds, all_task_means, all_task_stds = (
+            _compute_subset_vaf_curves(
+                all_subsets,
+                combination_labels,
+                combinations,
+                mode,
+                test.hid_size,
+                comp_range,
             )
         )
-    all_task_pc_means, all_task_pc_stds = _get_vaf_combination(
-        combination_labels, combinations_muscle, "muscle_acts", comp_range
-    )
-
-    _, ax = standard_2d_ax()
-    x = np.arange(1, comp_range)
-    for subset in subset_pc_dict_means:
-        ax.plot(
-            x,
-            subset_pc_dict_means[subset],
-            linewidth=4,
-            alpha=0.75,
-            color=all_subsets_colors[subset],
+        _plot_vaf_curves(
+            subset_means,
+            subset_stds,
+            all_task_means,
+            all_task_stds,
+            all_subsets_colors,
+            comp_range,
+            os.path.join(exp_path, save_name),
         )
-        ax.fill_between(
-            x,
-            subset_pc_dict_means[subset] - subset_pc_dict_stds[subset],
-            subset_pc_dict_means[subset] + subset_pc_dict_stds[subset],
-            color=all_subsets_colors[subset],
-            alpha=0.25,
-        )
-    ax.plot(x, all_task_pc_means, linewidth=4, alpha=0.75, color="grey")
-    ax.fill_between(
-        x,
-        all_task_pc_means - all_task_pc_stds,
-        all_task_pc_means + all_task_pc_stds,
-        color="grey",
-        alpha=0.25,
-    )
-
-    ax.set_ylim((0, 1.1))
-    save_fig(os.path.join(exp_path, "vaf_ratio_muscle"), eps=True)

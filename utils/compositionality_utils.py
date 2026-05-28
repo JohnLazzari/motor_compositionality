@@ -24,17 +24,9 @@ from utils.exp_utils import (
     env_dict,
     get_middle_movement,
     load_pickle,
+    extension_dict,
+    retraction_dict,
 )
-from modules.envs.reach import Reach
-from modules.envs.clk_curved_reach import ClkCurvedReach
-from modules.envs.cclk_curved_reach import CClkCurvedReach
-from modules.envs.sinusoid import Sinusoid
-from modules.envs.inv_sinusoid import InvSinusoid
-from modules.envs.reach_back import ReachBack
-from modules.envs.clk_cycle import ClkCycle
-from modules.envs.cclk_cycle import CClkCycle
-from modules.envs.figure_eight import Figure8
-from modules.envs.inv_figure_eight import InvFigure8
 import itertools
 import seaborn as sns
 from DSA import DSA
@@ -51,86 +43,6 @@ from utils.plot_utils import (
 )
 
 plt.rcParams.update({"font.size": 18})  # Sets default font size for all text
-
-# This is not included in a task pairing
-full_movements = [
-    "ReachBack",
-    "ClkCycle",
-    "CClkCycle",
-    "Figure8",
-    "InvFigure8",
-]
-
-env_dict_ext = {
-    "Reach": Reach,
-    "ClkCurvedReach": ClkCurvedReach,
-    "CClkCurvedReach": CClkCurvedReach,
-    "Sinusoid": Sinusoid,
-    "InvSinusoid": InvSinusoid,
-}
-
-env_dict_ret = {
-    "ReachBack": ReachBack,
-    "ClkCycle": ClkCycle,
-    "CClkCycle": CClkCycle,
-    "Figure8": Figure8,
-    "InvFigure8": InvFigure8,
-}
-
-# These are included in task pairings
-extension_movements_half = [
-    "Reach",
-    "ClkCurvedReach",
-    "CClkCurvedReach",
-    "Sinusoid",
-    "InvSinusoid",
-]
-
-extension_movements_full = [
-    "ReachBack1",
-    "ClkCycle1",
-    "CClkCycle1",
-    "Figure81",
-    "InvFigure81",
-]
-
-retraction_movements_full = [
-    "ReachBack2",
-    "ClkCycle2",
-    "CClkCycle2",
-    "Figure82",
-    "InvFigure82",
-]
-
-extension_half_combinations = list(itertools.combinations(extension_movements_half, 2))
-extension_full_combinations = list(itertools.combinations(extension_movements_full, 2))
-extension_tasks = [*extension_half_combinations, *extension_full_combinations]
-
-retraction_full_combinations = list(
-    itertools.combinations(retraction_movements_full, 2)
-)
-retraction_tasks = retraction_full_combinations
-
-subset_tasks = [
-    ("ClkCurvedReach", "ClkCycle1"),
-    ("Sinusoid", "Figure81"),
-    ("Reach", "ReachBack1"),
-    ("CClkCurvedReach", "CClkCycle1"),
-    ("InvSinusoid", "InvFigure81"),
-]
-
-rotated_tasks = [
-    ("ClkCurvedReach", "CClkCurvedReach"),
-    ("Sinusoid", "InvSinusoid"),
-    ("ClkCycle1", "CClkCycle1"),
-    ("ClkCycle2", "CClkCycle2"),
-    ("Figure81", "InvFigure81"),
-    ("Figure82", "InvFigure82"),
-]
-
-extension_retraction_tasks = list(
-    itertools.product(extension_movements_half, retraction_movements_full)
-)
 
 
 def get_mean_act(
@@ -193,9 +105,9 @@ def get_mean_act(
     env_hs = []
 
     if movement_type == "extension":
-        envs_to_use = extension_movements_half.copy()
+        envs_to_use = extension_dict.copy()
     elif movement_type == "extension_retraction":
-        envs_to_use = full_movements.copy()
+        envs_to_use = retraction_dict.copy()
     else:
         raise ValueError
 

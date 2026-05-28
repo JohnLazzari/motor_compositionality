@@ -344,6 +344,30 @@ def train_rnn256_softplus():
     mult_train.train(model_path, model_file)
 
 
+def train_rnn256_softplus_novis():
+    mult_train = MultitaskTrainer(zero_feedback="visual")
+    model_path = "checkpoints/rnn256_softplus_novis"
+    model_file = "rnn256_softplus_novis.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS NO VIS FEEDBACK")
+    mult_train.train(model_path, model_file)
+
+
+def train_rnn256_softplus_nopro():
+    mult_train = MultitaskTrainer(zero_feedback="proprioception")
+    model_path = "checkpoints/rnn256_softplus_nopro"
+    model_file = "rnn256_softplus_nopro.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS NO PRO FEEDBACK")
+    mult_train.train(model_path, model_file)
+
+
+def train_rnn256_softplus_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback="both")
+    model_path = "checkpoints/rnn256_softplus_nofeedback"
+    model_file = "rnn256_softplus_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS NO FEEDBACK")
+    mult_train.train(model_path, model_file)
+
+
 def train_rnn256_softplus_noreg():
     mult_train = MultitaskTrainer(
         l1_rate=0, l1_weight=0, l1_muscle_act=0, simple_dynamics_weight=0
@@ -467,6 +491,12 @@ if __name__ == "__main__":
         train_rnn256_softplus()
     elif args.experiment == "train_rnn256_softplus_noreg":
         train_rnn256_softplus_noreg()
+    elif args.experiment == "train_rnn256_softplus_novis":
+        train_rnn256_softplus_novis()
+    elif args.experiment == "train_rnn256_softplus_nopro":
+        train_rnn256_softplus_nopro()
+    elif args.experiment == "train_rnn256_softplus_nofeedback":
+        train_rnn256_softplus_nofeedback()
     elif args.experiment == "train_rnn512_softplus":
         train_rnn512_softplus()
     elif args.experiment == "train_rnn128_softplus":

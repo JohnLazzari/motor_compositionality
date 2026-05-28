@@ -38,6 +38,12 @@ DEF_HP = {
     "l1_weight": 0.001,
     "l1_muscle_act": 0.01,
     "simple_dynamics_weight": 0.001,
+    "zero_feedback": None,
+}
+
+FEEDBACK_SLICES = {
+    "vision": slice(14, 16),
+    "proprioception": slice(16, 22),
 }
 
 
@@ -62,6 +68,7 @@ class MultitaskTrainer:
         l1_weight: float = DEF_HP["l1_weight"],
         l1_muscle_act: float = DEF_HP["l1_muscle_act"],
         simple_dynamics_weight: float = DEF_HP["simple_dynamics_weight"],
+        zero_feedback: str | None = DEF_HP["zero_feedback"],
         save_model: bool = True,
     ):
         self.network = network
@@ -82,6 +89,7 @@ class MultitaskTrainer:
         self.l1_weight_scale = l1_weight
         self.l1_muscle_act_scale = l1_muscle_act
         self.simple_dynamics_weight = simple_dynamics_weight
+        self.zero_feedback = self._validate_zero_feedback(zero_feedback)
         self.save_model = save_model
 
         self.full_env_dict = {
@@ -108,6 +116,7 @@ class MultitaskTrainer:
         load_model_file=None,
         transfer=False,
     ):
+
         # create model path for saving model and hp
         create_dir(model_path)
 
@@ -198,6 +207,7 @@ class MultitaskTrainer:
             timestep = 0
             # simulate whole episode
             while not terminated:  # will run until `max_ep_duration` is reached
+                obs = self._zero_feedback(obs)
                 x, h, action = policy(obs, x, h)
                 obs, _, terminated, info = env.step(timestep, action=action)
 
@@ -284,6 +294,7 @@ class MultitaskTrainer:
                     print("\n")
 
     def eval(self, policy, env_dict=None):
+
         if env_dict is None:
             env_dict = self.full_env_dict
 
@@ -324,6 +335,7 @@ class MultitaskTrainer:
                 # simulate whole episode
                 while not terminated:  # will run until `max_ep_duration` is reached
                     with torch.no_grad():
+                        obs = self._zero_feedback(obs)
                         x, h, action = policy(obs, x, h)
                         obs, _, terminated, info = cur_env.step(timestep, action=action)
 
@@ -409,3 +421,31 @@ class MultitaskTrainer:
         for key in new_dict.keys():
             assert key in old_dict
             old_dict[key].extend(new_dict[key])
+
+    @staticmethod
+    def _validate_zero_feedback(zero_feedback):
+        aliases = {
+            None: None,
+            "vision": "vision",
+            "visual": "vision",
+            "proprio": "proprioception",
+            "proprioceptive": "proprioception",
+            "proprioception": "proprioception",
+            "both": "both",
+        }
+        if zero_feedback not in aliases:
+            raise ValueError(
+                "zero_feedback must be one of None, 'vision', 'proprioception', or 'both'"
+            )
+        return aliases[zero_feedback]
+
+    def _zero_feedback(self, obs):
+        if self.zero_feedback is None:
+            return obs
+
+        obs = obs.clone()
+        if self.zero_feedback in ("vision", "both"):
+            obs[:, FEEDBACK_SLICES["vision"]] = 0
+        if self.zero_feedback in ("proprioception", "both"):
+            obs[:, FEEDBACK_SLICES["proprioception"]] = 0
+        return obs

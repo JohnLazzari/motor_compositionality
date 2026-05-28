@@ -8,10 +8,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-import motornet as mn
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from modules.envs.reach import Reach
 from modules.envs.clk_curved_reach import ClkCurvedReach
 from modules.envs.cclk_curved_reach import CClkCurvedReach
@@ -58,6 +55,41 @@ retraction_dict = {
     "Figure8": Figure8,
     "InvFigure8": InvFigure8,
 }
+
+extension_movements_full = [
+    "ReachBack1",
+    "ClkCycle1",
+    "CClkCycle1",
+    "Figure81",
+    "InvFigure81",
+]
+
+retraction_movements_full = [
+    "ReachBack2",
+    "ClkCycle2",
+    "CClkCycle2",
+    "Figure82",
+    "InvFigure82",
+]
+
+# Create combination lists for extension tasks
+extension_half_combinations = list(
+    itertools.combinations(list(extension_dict.keys()), 2)
+)
+extension_full_combinations = list(itertools.combinations(extension_movements_full, 2))
+
+subset_tasks = [
+    ("ClkCurvedReach", "ClkCycle1"),
+    ("Sinusoid", "Figure81"),
+    ("Reach", "ReachBack1"),
+    ("CClkCurvedReach", "CClkCycle1"),
+    ("InvSinusoid", "InvFigure81"),
+]
+extension_tasks = [*extension_half_combinations, *extension_full_combinations]
+retraction_tasks = list(itertools.combinations(retraction_movements_full, 2))
+extension_retraction_tasks = list(
+    itertools.product(list(extension_dict.keys()), retraction_movements_full)
+)
 
 
 def save_pickle(file, obj):
