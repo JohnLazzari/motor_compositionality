@@ -1,2 +1,2 @@
 model_name=rnn256_softplus
-experiment=run_all_muscle_epoch_pcs
+experiment=train_rnn256_softplus_noreg
