@@ -14,10 +14,12 @@ class RNNPolicy(nn.Module):
         noise_level_inp=0.01,
         rec_constrained=False,
         inp_constrained=False,
+        resevoir=False,
         dt=10,
         t_const=100,
         batch_first=True,
         device="cpu",
+        output_activation="sigmoid",
         add_new_rule_inputs=False,
         num_new_inputs=10,
     ):
@@ -27,6 +29,7 @@ class RNNPolicy(nn.Module):
         self.n_layers = 1
         self.rec_constrained = rec_constrained
         self.inp_constrained = rec_constrained
+        self.resevoir = resevoir
         self.device = device
         self.dt = dt
         self.t_const = t_const
@@ -41,6 +44,7 @@ class RNNPolicy(nn.Module):
             noise_level_inp=noise_level_inp,
             rec_constrained=rec_constrained,
             inp_constrained=inp_constrained,
+            resevoir=resevoir,
             dt=dt,
             tau=t_const,
             batch_first=batch_first,
@@ -48,9 +52,11 @@ class RNNPolicy(nn.Module):
         )
 
         # Add Region
-        self.mrnn.add_recurrent_region("region", hid_size, learnable_bias=True)
+        self.mrnn.add_recurrent_region(
+            "region", hid_size, device=device, learnable_bias=True
+        )
         # Add Input
-        self.mrnn.add_input_region("input", inp_size)
+        self.mrnn.add_input_region("input", inp_size, device=device)
 
         # Add connections
         self.mrnn.add_recurrent_connection("region", "region")
@@ -61,10 +67,12 @@ class RNNPolicy(nn.Module):
             This can probably be done much easier by simply adding an input region with 2 inputs
         """
         if add_new_rule_inputs:
-            self.mrnn.add_input_region("input_new_rules", num_new_inputs)
+            self.mrnn.add_input_region(
+                "input_new_rules", num_new_inputs, device=device
+            )
             self.mrnn.add_input_connection("input_new_rules", "region")
 
-            self.mrnn.add_input_region("condition", inp_size - 10)
+            self.mrnn.add_input_region("condition", inp_size - 10, device=device)
             self.mrnn.add_input_connection("condition", "region")
 
             self.mrnn.inp_dict["condition"].connections["region"]["parameter"].data = (
@@ -83,6 +91,12 @@ class RNNPolicy(nn.Module):
 
         self.fc = torch.nn.Linear(self.mrnn.total_num_units, output_dim)
         self.sigmoid = torch.nn.Sigmoid()
+        if output_activation == "sigmoid":
+            self.output_activation = self.sigmoid
+        elif output_activation in (None, "identity"):
+            self.output_activation = torch.nn.Identity()
+        else:
+            raise ValueError("output_activation must be 'sigmoid', 'identity', or None")
 
         self.to(device)
 
@@ -92,8 +106,8 @@ class RNNPolicy(nn.Module):
         # Squeeze in the time dimension (doing timesteps one by one)
         h = h.squeeze(1)
         x = x.squeeze(1)
-        # Motor output
-        u = self.sigmoid(self.fc(h)).squeeze(dim=1)
+        # Policy output
+        u = self.output_activation(self.fc(h)).squeeze(dim=1)
         return x, h, u
 
 

@@ -24,7 +24,7 @@ class Test:
         model_name,
         noise_level_act=None,
         noise_level_inp=None,
-        device=None,
+        device="cpu",
         add_new_rule_inputs=False,
         num_new_inputs=10,
     ):
@@ -54,6 +54,7 @@ class Test:
         )
         self.rec_constrained = mult_train.rec_constrained
         self.inp_constrained = mult_train.inp_constrained
+        self.resevoir = getattr(mult_train, "resevoir", False)
         self.dt = mult_train.dt
         self.t_const = mult_train.t_const
         self.lr = mult_train.lr
@@ -64,6 +65,9 @@ class Test:
         self.l1_weight_scale = mult_train.l1_weight_scale
         self.l1_muscle_act_scale = mult_train.l1_muscle_act_scale
         self.simple_dynamics_weight = mult_train.simple_dynamics_weight
+        self.zero_feedback = MultitaskTrainer._validate_zero_feedback(
+            getattr(mult_train, "zero_feedback", None)
+        )
         self.device = device
         self.add_new_rule_inputs = add_new_rule_inputs
         self.num_new_inputs = num_new_inputs
@@ -77,6 +81,7 @@ class Test:
             self.activation_name,
             self.rec_constrained,
             self.inp_constrained,
+            self.resevoir,
             self.dt,
             self.t_const,
             self.noise_level_act,
@@ -104,7 +109,6 @@ class Test:
         options,
         env,
         stim=None,
-        feedback_mask=None,
         noise=False,
         rule_input=None,
     ):
@@ -172,12 +176,10 @@ class Test:
 
         # simulate whole episode
         while not terminated:  # will run until `max_ep_duration` is reached
+            obs = self._zero_feedback(obs)
+
             if rule_input is not None:
                 obs = self._replace_rule_input(rule_input, obs)
-
-            # Check if ablating feedback
-            if feedback_mask is not None:
-                obs = obs * feedback_mask
 
             with torch.no_grad():
                 # Check if silencing units
@@ -217,6 +219,10 @@ class Test:
 
         return trial_data
 
+    def _zero_feedback(self, obs):
+        """Apply the feedback ablation stored with the training configuration."""
+        return MultitaskTrainer._zero_feedback(self, obs)
+
     @staticmethod
     def load_model(
         model_path,
@@ -227,6 +233,7 @@ class Test:
         activation_name,
         rec_constrained,
         inp_constrained,
+        resevoir,
         dt,
         t_const,
         noise_act,
@@ -246,6 +253,7 @@ class Test:
                 noise_level_inp=noise_inp,
                 rec_constrained=rec_constrained,
                 inp_constrained=inp_constrained,
+                resevoir=resevoir,
                 dt=dt,
                 t_const=t_const,
                 device=device,

@@ -599,6 +599,8 @@ def composite_input_optimization(
         ep_t = 0
         # simulate whole episode
         while not terminated:
+            obs = test._zero_feedback(obs)
+
             # Check if doing composite inputs
             composite_inp = torch.cat([inp1, inp2, inp3, inp4, inp5, inp6], dim=1)
             obs = _replace_rule_input(composite_inp, obs)
@@ -752,6 +754,8 @@ def test_sequential_inputs(
     # simulate whole episode
     while not terminated:  # will run until `max_ep_duration` is reached
         with torch.no_grad():
+            obs = test._zero_feedback(obs)
+
             if timesteps < middle_movement:
                 obs = _replace_rule_input(extension_rule_input, obs)
 

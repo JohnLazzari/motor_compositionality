@@ -13,10 +13,6 @@ from utils.compositionality_utils import (
     get_mean_act,
     dsa_similarity_matrix,
     epoch_pcs,
-    gather_all_traj_metrics,
-    trajectory_metric_bar_plot,
-    convert_motif_dict_to_list,
-    plot_metric_scatter,
     composite_input_optimization,
     sequential_input_kinematics,
 )

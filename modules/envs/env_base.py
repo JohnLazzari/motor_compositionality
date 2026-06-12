@@ -18,6 +18,9 @@ class MotornetEnv(env.Environment):
     """
 
     def __init__(self, *args, **kwargs):
+        # MotorNet builds spaces by calling reset() during its constructor.
+        self.stable_time = 25
+        self.hold_time = 25
         super().__init__(*args, **kwargs)
         self.obs_noise = [0.0] * 28  # hardcoding size for now
         self.hidden_goal = None
@@ -25,8 +28,6 @@ class MotornetEnv(env.Environment):
         self.dt = 0.01
         self.go_cue = None
         self.initial_pos = None
-        self.stable_time = 25
-        self.hold_time = 25
         # Initialize empty 3d trajectory
         self.traj = th.empty(size=(1, 1, 1))
 
@@ -355,6 +356,67 @@ class MotornetEnv(env.Environment):
             dim=1,
         )
 
+    def _kinematic_targets(self):
+        """Return the full target trajectory without stepping a MotorNet effector."""
+        return th.cat(
+            [
+                self.traj[:, :1, :].repeat(1, self.epoch_bounds["delay"][1], 1),
+                self.traj,
+                self.traj[:, -1:, :].repeat(1, self.hold_time, 1),
+            ],
+            dim=1,
+        )
+
+    def _supervised_observations(self, inp_size):
+        """Build observations with arm feedback and previous-action inputs set to zero."""
+        obs = th.cat(
+            [
+                self.rule_input[:, None, :].repeat(1, self.speed_scalar.shape[1], 1),
+                self.speed_scalar,
+                self.go_cue,
+                self.vis_inp,
+            ],
+            dim=-1,
+        )
+        if obs.shape[-1] > inp_size:
+            raise ValueError(
+                f"inp_size must be at least {obs.shape[-1]} for kinematic training"
+            )
+
+        padding = th.zeros((*obs.shape[:-1], inp_size - obs.shape[-1]))
+        return th.cat([obs, padding], dim=-1)
+
+    @classmethod
+    def generate_supervised_trial(
+        cls,
+        batch_size,
+        testing=False,
+        reach_conds=None,
+        speed_cond=None,
+        delay_cond=None,
+        custom_delay=None,
+        inp_size=28,
+    ):
+        """Generate task inputs and xy targets without constructing an arm."""
+        task = cls.__new__(cls)
+        task.stable_time = 25
+        task.hold_time = 25
+        fingertip = th.zeros(size=(batch_size, 2))
+        task._configure_task(
+            batch_size,
+            testing,
+            reach_conds,
+            speed_cond,
+            delay_cond,
+            custom_delay,
+            fingertip,
+        )
+        return (
+            task._supervised_observations(inp_size),
+            task._kinematic_targets(),
+            task.epoch_bounds,
+        )
+
     def _finalize_reset(self, batch_size, deterministic):
         """Initialize observation buffers and return the reset observation/info."""
         action = th.zeros((batch_size, self.action_space.shape[0])).to(self.device)
@@ -389,4 +451,37 @@ class MotornetEnv(env.Environment):
         change the returned data. Here the goals (`i.e.`, the targets) are drawn from a random uniform distribution across
         the full joint space.
         """
+        (
+            _,
+            batch_size,
+            reach_conds,
+            speed_cond,
+            delay_cond,
+            custom_delay,
+            deterministic,
+            joint_state,
+        ) = self._reset_trial_options(seed, options)
+        fingertip = self._fingertip_from_joint_state(joint_state)
+        self._configure_task(
+            batch_size,
+            testing,
+            reach_conds,
+            speed_cond,
+            delay_cond,
+            custom_delay,
+            fingertip,
+        )
+        return self._finalize_reset(batch_size, deterministic)
+
+    def _configure_task(
+        self,
+        batch_size,
+        testing,
+        reach_conds,
+        speed_cond,
+        delay_cond,
+        custom_delay,
+        fingertip,
+    ):
+        """Configure the task timing, inputs, and xy trajectory."""
         raise NotImplementedError

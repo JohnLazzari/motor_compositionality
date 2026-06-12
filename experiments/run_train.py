@@ -344,6 +344,14 @@ def train_rnn256_softplus():
     mult_train.train(model_path, model_file)
 
 
+def train_rnn256_softplus_resevoir():
+    mult_train = MultitaskTrainer(resevoir=True)
+    model_path = "checkpoints/rnn256_softplus_resevoir"
+    model_file = "rnn256_softplus_resevoir.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS RESEVOIR")
+    mult_train.train(model_path, model_file)
+
+
 def train_rnn256_softplus_novis():
     mult_train = MultitaskTrainer(zero_feedback="visual")
     model_path = "checkpoints/rnn256_softplus_novis"
@@ -472,6 +480,14 @@ def train_gru256():
     mult_train.train(model_path, model_file)
 
 
+def train_rnn256_softplus_kinematics():
+    mult_train = MultitaskTrainer()
+    model_path = "checkpoints/rnn256_softplus_kinematics"
+    model_file = "rnn256_softplus_kinematics.pth"
+    print("TRAINING RNN ON SUPERVISED XY KINEMATICS")
+    mult_train.train_kinematics(model_path, model_file)
+
+
 def continue_training(model_name):
     model_path = f"checkpoints/{model_name}"
     model_file = f"{model_name}.pth"
@@ -521,6 +537,8 @@ if __name__ == "__main__":
         train_gru512()
     elif args.experiment == "train_gru128":
         train_gru128()
+    elif args.experiment == "train_rnn256_softplus_kinematics":
+        train_rnn256_softplus_kinematics()
     elif args.experiment == "continue_training":
         continue_training(args.model_name)
 

@@ -1,2 +1,2 @@
-model_name=rnn256_softplus
-experiment=train_rnn256_softplus_noreg
+model_name=rnn256_softplus_nofeedback
+experiment=neural_principal_angles_epoch
