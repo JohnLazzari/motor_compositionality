@@ -52,11 +52,9 @@ class RNNPolicy(nn.Module):
         )
 
         # Add Region
-        self.mrnn.add_recurrent_region(
-            "region", hid_size, device=device, learnable_bias=True
-        )
+        self.mrnn.add_recurrent_region("region", hid_size, learnable_bias=True)
         # Add Input
-        self.mrnn.add_input_region("input", inp_size, device=device)
+        self.mrnn.add_input_region("input", inp_size)
 
         # Add connections
         self.mrnn.add_recurrent_connection("region", "region")
@@ -67,12 +65,10 @@ class RNNPolicy(nn.Module):
             This can probably be done much easier by simply adding an input region with 2 inputs
         """
         if add_new_rule_inputs:
-            self.mrnn.add_input_region(
-                "input_new_rules", num_new_inputs, device=device
-            )
+            self.mrnn.add_input_region("input_new_rules", num_new_inputs, device)
             self.mrnn.add_input_connection("input_new_rules", "region")
 
-            self.mrnn.add_input_region("condition", inp_size - 10, device=device)
+            self.mrnn.add_input_region("condition", inp_size - 10, device)
             self.mrnn.add_input_connection("condition", "region")
 
             self.mrnn.inp_dict["condition"].connections["region"]["parameter"].data = (
