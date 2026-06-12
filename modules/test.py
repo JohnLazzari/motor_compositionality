@@ -55,6 +55,7 @@ class Test:
         self.rec_constrained = mult_train.rec_constrained
         self.inp_constrained = mult_train.inp_constrained
         self.resevoir = getattr(mult_train, "resevoir", False)
+        self.sparsity = getattr(mult_train, "sparsity", None)
         self.dt = mult_train.dt
         self.t_const = mult_train.t_const
         self.lr = mult_train.lr
@@ -82,6 +83,7 @@ class Test:
             self.rec_constrained,
             self.inp_constrained,
             self.resevoir,
+            self.sparsity,
             self.dt,
             self.t_const,
             self.noise_level_act,
@@ -234,6 +236,7 @@ class Test:
         rec_constrained,
         inp_constrained,
         resevoir,
+        sparsity,
         dt,
         t_const,
         noise_act,
@@ -254,6 +257,7 @@ class Test:
                 rec_constrained=rec_constrained,
                 inp_constrained=inp_constrained,
                 resevoir=resevoir,
+                sparsity=sparsity,
                 dt=dt,
                 t_const=t_const,
                 device=device,

@@ -344,11 +344,19 @@ def train_rnn256_softplus():
     mult_train.train(model_path, model_file)
 
 
-def train_rnn256_softplus_resevoir():
-    mult_train = MultitaskTrainer(resevoir=True)
-    model_path = "checkpoints/rnn256_softplus_resevoir"
-    model_file = "rnn256_softplus_resevoir.pth"
-    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS RESEVOIR")
+def train_rnn1000_softplus_resevoir():
+    mult_train = MultitaskTrainer(resevoir=True, hid_size=1000)
+    model_path = "checkpoints/rnn1000_softplus_resevoir"
+    model_file = "rnn1000_softplus_resevoir.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 1000 UNITS RESEVOIR")
+    mult_train.train(model_path, model_file)
+
+
+def train_rnn1000_softplus_echo():
+    mult_train = MultitaskTrainer(resevoir=True, hid_size=1000, sparsity=0.99)
+    model_path = "checkpoints/rnn1000_softplus_echo"
+    model_file = "rnn1000_softplus_echo.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 1000 UNITS ECHO")
     mult_train.train(model_path, model_file)
 
 
@@ -505,6 +513,10 @@ if __name__ == "__main__":
 
     if args.experiment == "train_rnn256_softplus":
         train_rnn256_softplus()
+    elif args.experiment == "train_rnn1000_softplus_resevoir":
+        train_rnn1000_softplus_resevoir()
+    elif args.experiment == "train_rnn1000_softplus_echo":
+        train_rnn1000_softplus_echo()
     elif args.experiment == "train_rnn256_softplus_noreg":
         train_rnn256_softplus_noreg()
     elif args.experiment == "train_rnn256_softplus_novis":

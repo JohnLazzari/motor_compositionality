@@ -15,6 +15,7 @@ class RNNPolicy(nn.Module):
         rec_constrained=False,
         inp_constrained=False,
         resevoir=False,
+        sparsity=None,
         dt=10,
         t_const=100,
         batch_first=True,
@@ -30,6 +31,7 @@ class RNNPolicy(nn.Module):
         self.rec_constrained = rec_constrained
         self.inp_constrained = rec_constrained
         self.resevoir = resevoir
+        self.sparsity = sparsity
         self.device = device
         self.dt = dt
         self.t_const = t_const
@@ -57,7 +59,7 @@ class RNNPolicy(nn.Module):
         self.mrnn.add_input_region("input", inp_size)
 
         # Add connections
-        self.mrnn.add_recurrent_connection("region", "region")
+        self.mrnn.add_recurrent_connection("region", "region", sparsity=sparsity)
         self.mrnn.add_input_connection("input", "region")
 
         """

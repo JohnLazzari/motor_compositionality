@@ -29,6 +29,7 @@ DEF_HP = {
     "rec_constrained": False,
     "inp_constrained": False,
     "resevoir": False,
+    "sparsity": None,
     "dt": 10,
     "t_const": 20,
     "lr": 0.001,
@@ -60,6 +61,7 @@ class MultitaskTrainer:
         rec_constrained: bool = DEF_HP["rec_constrained"],
         inp_constrained: bool = DEF_HP["inp_constrained"],
         resevoir: bool = DEF_HP["resevoir"],
+        sparsity: float | None = DEF_HP["sparsity"],
         dt: int = DEF_HP["dt"],
         t_const: int = DEF_HP["t_const"],
         lr: float = DEF_HP["lr"],
@@ -82,6 +84,7 @@ class MultitaskTrainer:
         self.rec_constrained = rec_constrained
         self.inp_constrained = inp_constrained
         self.resevoir = resevoir
+        self.sparsity = sparsity
         self.dt = dt
         self.t_const = t_const
         self.lr = lr
@@ -140,6 +143,7 @@ class MultitaskTrainer:
             "rec_constrained": self.rec_constrained,
             "inp_constrained": self.inp_constrained,
             "resevoir": self.resevoir,
+            "sparsity": self.sparsity,
             "dt": self.dt,
             "t_const": self.t_const,
             "device": device,
@@ -328,6 +332,7 @@ class MultitaskTrainer:
             rec_constrained=self.rec_constrained,
             inp_constrained=self.inp_constrained,
             resevoir=self.resevoir,
+            sparsity=self.sparsity,
             dt=self.dt,
             t_const=self.t_const,
             device=device,
