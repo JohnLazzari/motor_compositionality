@@ -527,10 +527,10 @@ if __name__ == "__main__":
 
     if args.experiment == "train_rnn256_softplus":
         train_rnn256_softplus()
-    elif args.experiment == "train_rnn1000_softplus_resevoir":
-        train_rnn1000_softplus_resevoir()
-    elif args.experiment == "train_rnn1000_softplus_echo":
-        train_rnn1000_softplus_echo()
+    elif args.experiment == "train_rnn256_softplus_resevoir":
+        train_rnn256_softplus_resevoir()
+    elif args.experiment == "train_rnn256_softplus_echo":
+        train_rnn256_softplus_echo()
     elif args.experiment == "train_rnn256_softplus_noreg":
         train_rnn256_softplus_noreg()
     elif args.experiment == "train_rnn256_softplus_novis":
