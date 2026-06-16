@@ -105,6 +105,14 @@ def load_pickle(file):
     return mult_train
 
 
+def load_torch_checkpoint(file, map_location=None):
+    """Load a trusted local PyTorch checkpoint saved by this project."""
+    try:
+        return torch.load(file, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(file, map_location=map_location)
+
+
 def mov_bounds(trial_data):
     """
     Helper function to get movement epoch bounds

@@ -9,7 +9,11 @@ import warnings
 warnings.filterwarnings("ignore")
 import pickle
 
+import matplotlib.pyplot as plt
+import numpy as np
+
 from modules.multitask_training import MultitaskTrainer
+from modules.models import RNNPolicy
 from modules.envs.reach import Reach
 from modules.envs.clk_curved_reach import ClkCurvedReach
 from modules.envs.cclk_curved_reach import CClkCurvedReach
@@ -345,7 +349,7 @@ def train_rnn256_softplus():
 
 
 def train_rnn256_softplus_resevoir():
-    mult_train = MultitaskTrainer(resevoir=True, hid_size=256)
+    mult_train = MultitaskTrainer(resevoir=True, hid_size=256, spectral_radius=1.3)
     env_dict = {
         "Reach": Reach,
         "ClkCurvedReach": ClkCurvedReach,
@@ -360,7 +364,9 @@ def train_rnn256_softplus_resevoir():
 
 
 def train_rnn256_softplus_echo():
-    mult_train = MultitaskTrainer(resevoir=True, hid_size=256, sparsity=0.99)
+    mult_train = MultitaskTrainer(
+        resevoir=True, hid_size=256, sparsity=0.99, spectral_radius=1.3
+    )
     env_dict = {
         "Reach": Reach,
         "ClkCurvedReach": ClkCurvedReach,
@@ -375,7 +381,7 @@ def train_rnn256_softplus_echo():
 
 
 def train_rnn256_softplus_novis():
-    mult_train = MultitaskTrainer(zero_feedback="visual")
+    mult_train = MultitaskTrainer(zero_feedback=True)
     model_path = "checkpoints/rnn256_softplus_novis"
     model_file = "rnn256_softplus_novis.pth"
     print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS NO VIS FEEDBACK")
@@ -383,7 +389,7 @@ def train_rnn256_softplus_novis():
 
 
 def train_rnn256_softplus_nopro():
-    mult_train = MultitaskTrainer(zero_feedback="proprioception")
+    mult_train = MultitaskTrainer(zero_feedback=True)
     model_path = "checkpoints/rnn256_softplus_nopro"
     model_file = "rnn256_softplus_nopro.pth"
     print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS NO PRO FEEDBACK")
@@ -391,7 +397,7 @@ def train_rnn256_softplus_nopro():
 
 
 def train_rnn256_softplus_nofeedback():
-    mult_train = MultitaskTrainer(zero_feedback="both")
+    mult_train = MultitaskTrainer(zero_feedback=True)
     model_path = "checkpoints/rnn256_softplus_nofeedback"
     model_file = "rnn256_softplus_nofeedback.pth"
     print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS NO FEEDBACK")
@@ -503,11 +509,18 @@ def train_gru256():
 
 
 def train_rnn256_softplus_kinematics():
-    mult_train = MultitaskTrainer()
+    mult_train = MultitaskTrainer(
+        inp_size=14,
+        epochs=100_000,
+        l1_rate=1e-4,
+        l1_weight=1e-4,
+        simple_dynamics_weight=1e-4,
+    )
     model_path = "checkpoints/rnn256_softplus_kinematics"
     model_file = "rnn256_softplus_kinematics.pth"
-    print("TRAINING RNN ON SUPERVISED XY KINEMATICS")
-    mult_train.train_kinematics(model_path, model_file)
+    data_path = "checkpoints/rnn256_softplus/muscle_act_data.pkl"
+    print("TRAINING RNN ON SUPERVISED MUSCLE ACTIVITY")
+    mult_train.train_kinematics(model_path, model_file, data_path=data_path)
 
 
 def continue_training(model_name):

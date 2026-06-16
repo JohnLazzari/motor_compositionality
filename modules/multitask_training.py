@@ -5,7 +5,7 @@ import random
 import os
 import pickle
 
-from modules.models import RNNPolicy, GRUPolicy
+from modules.models import RNNPolicy, GRUPolicy, RNNMusclePolicy
 from modules.envs.reach import Reach
 from modules.envs.clk_curved_reach import ClkCurvedReach
 from modules.envs.cclk_curved_reach import CClkCurvedReach
@@ -17,7 +17,7 @@ from modules.envs.cclk_cycle import CClkCycle
 from modules.envs.figure_eight import Figure8
 from modules.envs.inv_figure_eight import InvFigure8
 from utils.plot_utils import create_dir
-from utils.exp_utils import save_pickle
+from utils.exp_utils import load_pickle, save_pickle, load_torch_checkpoint
 
 DEF_HP = {
     "network": "rnn",
@@ -30,6 +30,7 @@ DEF_HP = {
     "inp_constrained": False,
     "resevoir": False,
     "sparsity": None,
+    "spectral_radius": None,
     "dt": 10,
     "t_const": 20,
     "lr": 0.001,
@@ -40,12 +41,7 @@ DEF_HP = {
     "l1_weight": 0.001,
     "l1_muscle_act": 0.01,
     "simple_dynamics_weight": 0.001,
-    "zero_feedback": None,
-}
-
-FEEDBACK_SLICES = {
-    "vision": slice(14, 16),
-    "proprioception": slice(16, 22),
+    "zero_feedback": False,
 }
 
 
@@ -62,6 +58,7 @@ class MultitaskTrainer:
         inp_constrained: bool = DEF_HP["inp_constrained"],
         resevoir: bool = DEF_HP["resevoir"],
         sparsity: float | None = DEF_HP["sparsity"],
+        spectral_radius: float | None = DEF_HP["spectral_radius"],
         dt: int = DEF_HP["dt"],
         t_const: int = DEF_HP["t_const"],
         lr: float = DEF_HP["lr"],
@@ -72,7 +69,7 @@ class MultitaskTrainer:
         l1_weight: float = DEF_HP["l1_weight"],
         l1_muscle_act: float = DEF_HP["l1_muscle_act"],
         simple_dynamics_weight: float = DEF_HP["simple_dynamics_weight"],
-        zero_feedback: str | None = DEF_HP["zero_feedback"],
+        zero_feedback: bool = DEF_HP["zero_feedback"],
         save_model: bool = True,
     ):
         self.network = network
@@ -85,6 +82,7 @@ class MultitaskTrainer:
         self.inp_constrained = inp_constrained
         self.resevoir = resevoir
         self.sparsity = sparsity
+        self.spectral_radius = spectral_radius
         self.dt = dt
         self.t_const = t_const
         self.lr = lr
@@ -95,7 +93,7 @@ class MultitaskTrainer:
         self.l1_weight_scale = l1_weight
         self.l1_muscle_act_scale = l1_muscle_act
         self.simple_dynamics_weight = simple_dynamics_weight
-        self.zero_feedback = self._validate_zero_feedback(zero_feedback)
+        self.zero_feedback = zero_feedback
         self.save_model = save_model
         self.training_mode = "arm"
 
@@ -123,7 +121,6 @@ class MultitaskTrainer:
         load_model_file=None,
         transfer=False,
     ):
-
         # create model path for saving model and hp
         create_dir(model_path)
 
@@ -144,6 +141,7 @@ class MultitaskTrainer:
             "inp_constrained": self.inp_constrained,
             "resevoir": self.resevoir,
             "sparsity": self.sparsity,
+            "spectral_radius": self.spectral_radius,
             "dt": self.dt,
             "t_const": self.t_const,
             "device": device,
@@ -172,7 +170,7 @@ class MultitaskTrainer:
 
         if load_model:
             # Load in a previous model
-            checkpoint = torch.load(
+            checkpoint = load_torch_checkpoint(
                 os.path.join(load_model_path, load_model_file),
                 map_location=torch.device("cpu"),
             )
@@ -202,7 +200,9 @@ class MultitaskTrainer:
             h = torch.zeros(size=(self.batch_size, self.hid_size))
 
             env_name = random.choices(env_list, probs)[0]
-            env = env_dict[env_name](effector=effector)
+            env = env_dict[env_name](
+                effector=effector, zero_feedback=self.zero_feedback
+            )
 
             # Get first timestep
             obs, info = env.reset(options={"batch_size": self.batch_size})
@@ -217,7 +217,6 @@ class MultitaskTrainer:
             timestep = 0
             # simulate whole episode
             while not terminated:  # will run until `max_ep_duration` is reached
-                obs = self._zero_feedback(obs)
                 x, h, action = policy(obs, x, h)
                 obs, _, terminated, info = env.step(timestep, action=action)
 
@@ -312,20 +311,58 @@ class MultitaskTrainer:
         load_optim=False,
         load_model_path=None,
         load_model_file=None,
+        data_path=None,
+        probs=None,
     ):
-        """Train an RNN to produce task xy trajectories without a MotorNet arm."""
+        """Train an RNN to predict muscle activity from saved supervised inputs."""
         if self.network != "rnn":
             raise ValueError("Kinematic training currently supports only RNNPolicy")
 
         create_dir(model_path)
         self.training_mode = "kinematics"
+        self.zero_feedback = True
         save_pickle(f"{model_path}/mult_train.pkl", self)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Training kinematics on device: {device}")
 
-        policy = RNNPolicy(
+        if data_path is None:
+            data_path = os.path.join(model_path, "muscle_act_data.pkl")
+        muscle_data = load_pickle(data_path)
+
+        if env_dict is None:
+            env_list = list(muscle_data["tasks"])
+        else:
+            env_list = list(env_dict)
+        missing_envs = [
+            env_name for env_name in env_list if env_name not in muscle_data["tasks"]
+        ]
+        if missing_envs:
+            raise ValueError(f"Missing muscle data for environments: {missing_envs}")
+
+        if probs is None:
+            probs = [1 / len(env_list)] * len(env_list)
+
+        train_direction_indices = self._even_condition_indices(
+            len(muscle_data["reach_conds"]), 8
+        )
+        train_speed_conds = [
+            int(muscle_data["speed_conds"][i])
+            for i in self._even_condition_indices(len(muscle_data["speed_conds"]), 3)
+        ]
+
+        sample_env = env_list[0]
+        sample_speed = train_speed_conds[0]
+        sample_obs = muscle_data["tasks"][sample_env][sample_speed]["obs"]
+        sample_target = muscle_data["tasks"][sample_env][sample_speed]["action"]
+        if sample_obs.shape[-1] != self.inp_size:
+            raise ValueError(
+                f"inp_size={self.inp_size} does not match supervised obs size {sample_obs.shape[-1]}"
+            )
+
+        policy = RNNMusclePolicy(
             inp_size=self.inp_size,
             hid_size=self.hid_size,
-            output_dim=2,
+            output_dim=sample_target.shape[-1],
             activation_name=self.activation_name,
             noise_level_act=self.noise_level_act,
             noise_level_inp=self.noise_level_inp,
@@ -333,10 +370,11 @@ class MultitaskTrainer:
             inp_constrained=self.inp_constrained,
             resevoir=self.resevoir,
             sparsity=self.sparsity,
+            spectral_radius=self.spectral_radius,
             dt=self.dt,
             t_const=self.t_const,
             device=device,
-            output_activation="identity",
+            output_activation="sigmoid",
         )
         optimizer = torch.optim.Adam(policy.parameters(), lr=self.lr)
 
@@ -345,18 +383,13 @@ class MultitaskTrainer:
         if load_model_file is None:
             load_model_file = model_file
         if load_model:
-            checkpoint = torch.load(
+            checkpoint = load_torch_checkpoint(
                 os.path.join(load_model_path, load_model_file),
                 map_location=device,
             )
             policy.load_state_dict(checkpoint["agent_state_dict"])
             if load_optim:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-
-        if env_dict is None:
-            env_dict = self.full_env_dict
-        env_list = list(env_dict)
-        probs = [1 / len(env_list)] * len(env_list)
 
         env_losses = self._empty_loss_dict()
         total_losses = []
@@ -367,15 +400,17 @@ class MultitaskTrainer:
 
         for batch in range(self.epochs):
             env_name = random.choices(env_list, probs)[0]
+            speed = random.choice(train_speed_conds)
             predictions, targets, hs = self._run_kinematic_trial(
                 policy,
-                env_dict[env_name],
-                batch_size=self.batch_size,
-                device=device,
+                muscle_data["tasks"][env_name][speed],
+                train_direction_indices,
+                device,
                 noise=True,
             )
 
-            loss = self.l1_dist(predictions, targets)
+            mse_loss = torch.nn.functional.mse_loss(predictions, targets)
+            loss = mse_loss
             loss += self.l1_rate(hs, self.l1_rate_scale)
             loss += self.l1_weight(policy, self.l1_weight_scale)
             if self.activation_name != "tanh":
@@ -401,7 +436,9 @@ class MultitaskTrainer:
                 np.savetxt(os.path.join(model_path, "total_losses.txt"), total_losses)
 
             if batch % self.save_iter == 0:
-                test_loss_envs, test_loss = self.eval_kinematics(policy, env_dict)
+                test_loss_envs, test_loss = self.eval_kinematics(
+                    policy, muscle_data, env_list=env_list
+                )
                 self._update_loss_dict(test_loss_envs, env_test_losses)
                 total_test_losses.append(test_loss)
                 save_pickle(
@@ -418,6 +455,9 @@ class MultitaskTrainer:
                             "agent_state_dict": policy.state_dict(),
                             "optimizer_state_dict": optimizer.state_dict(),
                             "training_mode": "kinematics",
+                            "data_path": data_path,
+                            "train_direction_indices": train_direction_indices.tolist(),
+                            "train_speed_conds": list(train_speed_conds),
                         },
                         os.path.join(model_path, model_file),
                     )
@@ -425,39 +465,39 @@ class MultitaskTrainer:
                     print(f"Directory: {model_path}/{model_file}")
                     print("\n")
 
-    def eval_kinematics(self, policy, env_dict=None):
-        """Evaluate arm-free xy prediction across all task directions and speeds."""
-        if env_dict is None:
-            env_dict = self.full_env_dict
+    def eval_kinematics(self, policy, muscle_data, env_list=None):
+        """Evaluate supervised muscle prediction on every saved condition."""
+        if env_list is None:
+            env_list = list(muscle_data["tasks"])
 
         device = next(policy.parameters()).device
-        speed_conds = list(np.arange(0, 10))
+        direction_indices = np.arange(len(muscle_data["reach_conds"]))
+        speed_conds = [int(speed) for speed in muscle_data["speed_conds"]]
         total_test_loss = 0
         condition_losses = self._empty_loss_dict()
 
-        for env_name, env in env_dict.items():
+        for env_name in env_list:
             condition_loss = 0
             for speed in speed_conds:
                 with torch.no_grad():
                     predictions, targets, _ = self._run_kinematic_trial(
                         policy,
-                        env,
-                        batch_size=32,
-                        device=device,
+                        muscle_data["tasks"][env_name][speed],
+                        direction_indices,
+                        device,
                         noise=False,
-                        testing=True,
-                        reach_conds=np.arange(0, 32),
-                        speed_cond=speed,
                     )
-                condition_loss += self.l1_dist(predictions, targets).item()
+                condition_loss += torch.nn.functional.mse_loss(
+                    predictions, targets
+                ).item()
             condition_loss /= len(speed_conds)
             condition_losses[env_name].append(condition_loss)
             total_test_loss += condition_loss
-        total_test_loss /= len(env_dict)
+        total_test_loss /= len(env_list)
 
         print("\n")
         print("Kinematic Eval Results:")
-        for env_name in env_dict:
+        for env_name in env_list:
             print(
                 f"Total Loss for Environment {env_name}| "
                 f"{condition_losses[env_name][0]}"
@@ -471,38 +511,27 @@ class MultitaskTrainer:
     def _run_kinematic_trial(
         self,
         policy,
-        env,
-        batch_size,
+        condition_data,
+        direction_indices,
         device,
         noise,
-        testing=False,
-        reach_conds=None,
-        speed_cond=None,
     ):
-        """Run an RNN over generated inputs and return predicted and target xy signals."""
-        observations, targets, _ = env.generate_supervised_trial(
-            batch_size=batch_size,
-            testing=testing,
-            reach_conds=reach_conds,
-            speed_cond=speed_cond,
-            inp_size=self.inp_size,
-        )
-        observations = observations.to(device)
-        targets = targets.to(device)
+        """Run a sequence RNN over saved inputs and return muscle predictions/targets."""
+        observations = condition_data["obs"][direction_indices]
+        targets = condition_data["action"][direction_indices]
+        observations = torch.as_tensor(observations, dtype=torch.float32, device=device)
+        targets = torch.as_tensor(targets, dtype=torch.float32, device=device)
+        batch_size = observations.shape[0]
         x = torch.zeros(size=(batch_size, self.hid_size), device=device)
         h = torch.zeros(size=(batch_size, self.hid_size), device=device)
-        predictions = []
-        hs = []
+        _, hs, predictions = policy(observations, x, h, noise=noise)
+        return predictions, targets, hs
 
-        for timestep in range(targets.shape[1]):
-            x, h, xy = policy(observations[:, timestep, :], x, h, noise=noise)
-            predictions.append(xy.unsqueeze(1))
-            hs.append(h.unsqueeze(1))
-
-        return torch.cat(predictions, dim=1), targets, torch.cat(hs, dim=1)
+    @staticmethod
+    def _even_condition_indices(num_conditions, num_samples):
+        return np.linspace(0, num_conditions - 1, num_samples, dtype=int)
 
     def eval(self, policy, env_dict=None):
-
         if env_dict is None:
             env_dict = self.full_env_dict
 
@@ -522,7 +551,9 @@ class MultitaskTrainer:
                 x = torch.zeros(size=(32, self.hid_size))
                 h = torch.zeros(size=(32, self.hid_size))
 
-                cur_env = env_dict[env](effector=effector)
+                cur_env = env_dict[env](
+                    effector=effector, zero_feedback=self.zero_feedback
+                )
 
                 # Get first timestep
                 obs, info = cur_env.reset(
@@ -543,7 +574,6 @@ class MultitaskTrainer:
                 # simulate whole episode
                 while not terminated:  # will run until `max_ep_duration` is reached
                     with torch.no_grad():
-                        obs = self._zero_feedback(obs)
                         x, h, action = policy(obs, x, h)
                         obs, _, terminated, info = cur_env.step(timestep, action=action)
 
@@ -629,31 +659,3 @@ class MultitaskTrainer:
         for key in new_dict.keys():
             assert key in old_dict
             old_dict[key].extend(new_dict[key])
-
-    @staticmethod
-    def _validate_zero_feedback(zero_feedback):
-        aliases = {
-            None: None,
-            "vision": "vision",
-            "visual": "vision",
-            "proprio": "proprioception",
-            "proprioceptive": "proprioception",
-            "proprioception": "proprioception",
-            "both": "both",
-        }
-        if zero_feedback not in aliases:
-            raise ValueError(
-                "zero_feedback must be one of None, 'vision', 'proprioception', or 'both'"
-            )
-        return aliases[zero_feedback]
-
-    def _zero_feedback(self, obs):
-        if self.zero_feedback is None:
-            return obs
-
-        obs = obs.clone()
-        if self.zero_feedback in ("vision", "both"):
-            obs[:, FEEDBACK_SLICES["vision"]] = 0
-        if self.zero_feedback in ("proprioception", "both"):
-            obs[:, FEEDBACK_SLICES["proprioception"]] = 0
-        return obs

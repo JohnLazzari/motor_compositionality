@@ -1,2 +1,2 @@
-model_name=rnn256_softplus_nofeedback
-experiment=neural_principal_angles_epoch
+model_name=rnn256_softplus_kinematics
+experiment=plot_mrnn_eigenvalues

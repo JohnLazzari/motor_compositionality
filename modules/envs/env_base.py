@@ -19,10 +19,13 @@ class MotornetEnv(env.Environment):
 
     def __init__(self, *args, **kwargs):
         # MotorNet builds spaces by calling reset() during its constructor.
+        self.zero_feedback = kwargs.pop("zero_feedback", False)
+        if type(self.zero_feedback) is not bool:
+            raise TypeError("zero_feedback must be a boolean")
         self.stable_time = 25
         self.hold_time = 25
         super().__init__(*args, **kwargs)
-        self.obs_noise = [0.0] * 28  # hardcoding size for now
+        self.obs_noise = [0.0] * self._get_obs_size()
         self.hidden_goal = None
         # timestep info
         self.dt = 0.01
@@ -51,16 +54,30 @@ class MotornetEnv(env.Environment):
             self.speed_scalar[:, t],
             self.go_cue[:, t],
             self.vis_inp[:, t],
-            self.obs_buffer["vision"][0],
-            self.obs_buffer["proprioception"][0],
-        ] + self.obs_buffer["action"][: self.action_frame_stacking]
+        ]
+        if not self.zero_feedback:
+            obs_as_list.append(self.obs_buffer["vision"][0])
+            obs_as_list.append(self.obs_buffer["proprioception"][0])
+        obs_as_list += self.obs_buffer["action"][: self.action_frame_stacking]
 
         obs = th.cat(obs_as_list, dim=-1)
 
         if deterministic is False:
-            obs = self.apply_noise(obs, noise=self.obs_noise)
+            noise = self.obs_noise
+            if len(noise) != obs.shape[-1]:
+                noise = [0.0] * obs.shape[-1]
+            obs = self.apply_noise(obs, noise=noise)
 
         return obs if self.differentiable else self.detach(obs)
+
+    def _get_obs_size(self):
+        base_size = 14
+        feedback_size = 0
+        if not self.zero_feedback:
+            feedback_size += self.skeleton.space_dim
+            feedback_size += 2 * self.effector.n_muscles
+        action_size = self.effector.n_muscles * self.action_frame_stacking
+        return base_size + feedback_size + action_size
 
     def step(
         self,

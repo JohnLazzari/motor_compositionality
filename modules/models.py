@@ -16,6 +16,7 @@ class RNNPolicy(nn.Module):
         inp_constrained=False,
         resevoir=False,
         sparsity=None,
+        spectral_radius=None,
         dt=10,
         t_const=100,
         batch_first=True,
@@ -32,6 +33,7 @@ class RNNPolicy(nn.Module):
         self.inp_constrained = rec_constrained
         self.resevoir = resevoir
         self.sparsity = sparsity
+        self.spectral_radius = spectral_radius
         self.device = device
         self.dt = dt
         self.t_const = t_const
@@ -40,18 +42,20 @@ class RNNPolicy(nn.Module):
         self.sigma_input = noise_level_inp
         self.activation_name = activation_name
 
-        self.mrnn = mRNN(
-            activation=activation_name,
-            noise_level_act=noise_level_act,
-            noise_level_inp=noise_level_inp,
-            rec_constrained=rec_constrained,
-            inp_constrained=inp_constrained,
-            resevoir=resevoir,
-            dt=dt,
-            tau=t_const,
-            batch_first=batch_first,
-            device=device,
-        )
+        mrnn_kwargs = {
+            "activation": activation_name,
+            "noise_level_act": noise_level_act,
+            "noise_level_inp": noise_level_inp,
+            "rec_constrained": rec_constrained,
+            "inp_constrained": inp_constrained,
+            "spectral_radius": spectral_radius,
+            "resevoir": resevoir,
+            "dt": dt,
+            "tau": t_const,
+            "batch_first": batch_first,
+            "device": device,
+        }
+        self.mrnn = mRNN(**mrnn_kwargs)
 
         # Add Region
         self.mrnn.add_recurrent_region("region", hid_size, learnable_bias=True)
@@ -67,10 +71,10 @@ class RNNPolicy(nn.Module):
             This can probably be done much easier by simply adding an input region with 2 inputs
         """
         if add_new_rule_inputs:
-            self.mrnn.add_input_region("input_new_rules", num_new_inputs, device)
+            self.mrnn.add_input_region("input_new_rules", num_new_inputs)
             self.mrnn.add_input_connection("input_new_rules", "region")
 
-            self.mrnn.add_input_region("condition", inp_size - 10, device)
+            self.mrnn.add_input_region("condition", inp_size - 10)
             self.mrnn.add_input_connection("condition", "region")
 
             self.mrnn.inp_dict["condition"].connections["region"]["parameter"].data = (
@@ -106,6 +110,13 @@ class RNNPolicy(nn.Module):
         x = x.squeeze(1)
         # Policy output
         u = self.output_activation(self.fc(h)).squeeze(dim=1)
+        return x, h, u
+
+
+class RNNMusclePolicy(RNNPolicy):
+    def forward(self, obs, x, h, *args, noise=True):
+        x, h = self.mrnn(obs, x, h, *args, noise=noise)
+        u = self.output_activation(self.fc(h))
         return x, h, u
 
 

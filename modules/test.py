@@ -14,7 +14,7 @@ from modules.envs.cclk_cycle import CClkCycle
 from modules.envs.figure_eight import Figure8
 from modules.envs.inv_figure_eight import InvFigure8
 from modules.multitask_training import MultitaskTrainer
-from utils.exp_utils import load_pickle
+from utils.exp_utils import load_pickle, load_torch_checkpoint
 
 
 class Test:
@@ -56,6 +56,7 @@ class Test:
         self.inp_constrained = mult_train.inp_constrained
         self.resevoir = getattr(mult_train, "resevoir", False)
         self.sparsity = getattr(mult_train, "sparsity", None)
+        self.spectral_radius = getattr(mult_train, "spectral_radius", None)
         self.dt = mult_train.dt
         self.t_const = mult_train.t_const
         self.lr = mult_train.lr
@@ -66,9 +67,9 @@ class Test:
         self.l1_weight_scale = mult_train.l1_weight_scale
         self.l1_muscle_act_scale = mult_train.l1_muscle_act_scale
         self.simple_dynamics_weight = mult_train.simple_dynamics_weight
-        self.zero_feedback = MultitaskTrainer._validate_zero_feedback(
-            getattr(mult_train, "zero_feedback", None)
-        )
+        self.zero_feedback = getattr(mult_train, "zero_feedback", False)
+        if self.zero_feedback is None:
+            self.zero_feedback = False
         self.device = device
         self.add_new_rule_inputs = add_new_rule_inputs
         self.num_new_inputs = num_new_inputs
@@ -84,6 +85,7 @@ class Test:
             self.inp_constrained,
             self.resevoir,
             self.sparsity,
+            self.spectral_radius,
             self.dt,
             self.t_const,
             self.noise_level_act,
@@ -129,8 +131,6 @@ class Test:
             Environment constructor. Should accept an effector keyword argument.
         stim : torch.Tensor, optional
             Tensor to silence or stimulate specific hidden units. Default is None.
-        feedback_mask : torch.Tensor, optional
-            Mask to ablate parts of the observation vector. Default is None.
         noise : bool, optional
             Whether to inject noise into the network. Default is False.
         noise_act : float, optional
@@ -155,7 +155,7 @@ class Test:
         """
 
         effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-        env = env(effector=effector)
+        env = env(effector=effector, zero_feedback=self.zero_feedback)
 
         self.batch_size = options["batch_size"]
 
@@ -178,8 +178,6 @@ class Test:
 
         # simulate whole episode
         while not terminated:  # will run until `max_ep_duration` is reached
-            obs = self._zero_feedback(obs)
-
             if rule_input is not None:
                 obs = self._replace_rule_input(rule_input, obs)
 
@@ -221,10 +219,6 @@ class Test:
 
         return trial_data
 
-    def _zero_feedback(self, obs):
-        """Apply the feedback ablation stored with the training configuration."""
-        return MultitaskTrainer._zero_feedback(self, obs)
-
     @staticmethod
     def load_model(
         model_path,
@@ -237,6 +231,7 @@ class Test:
         inp_constrained,
         resevoir,
         sparsity,
+        spectral_radius,
         dt,
         t_const,
         noise_act,
@@ -258,6 +253,7 @@ class Test:
                 inp_constrained=inp_constrained,
                 resevoir=resevoir,
                 sparsity=sparsity,
+                spectral_radius=spectral_radius,
                 dt=dt,
                 t_const=t_const,
                 device=device,
@@ -265,7 +261,7 @@ class Test:
                 num_new_inputs=num_new_inputs,
             )
 
-            checkpoint = torch.load(
+            checkpoint = load_torch_checkpoint(
                 os.path.join(model_path, model_file),
                 map_location=torch.device("cpu"),
             )
@@ -274,7 +270,7 @@ class Test:
         elif network == "gru":
             policy = GRUPolicy(inp_size, hid_size, 6, batch_first=True)
 
-            checkpoint = torch.load(
+            checkpoint = load_torch_checkpoint(
                 os.path.join(model_path, model_file),
                 map_location=torch.device("cpu"),
             )

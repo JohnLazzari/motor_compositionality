@@ -528,8 +528,6 @@ def composite_input_optimization(
         Environment constructor. Should accept an effector keyword argument.
     stim : torch.Tensor, optional
         Tensor to silence or stimulate specific hidden units. Default is None.
-    feedback_mask : torch.Tensor, optional
-        Mask to ablate parts of the observation vector. Default is None.
     noise : bool, optional
         Whether to inject noise into the network. Default is False.
     noise_act : float, optional
@@ -581,7 +579,7 @@ def composite_input_optimization(
         x = torch.zeros(size=(test.batch_size, test.hid_size))
         h = torch.zeros(size=(test.batch_size, test.hid_size))
 
-        env_tmp = env(effector=effector)
+        env_tmp = env(effector=effector, zero_feedback=test.zero_feedback)
         obs, info = env_tmp.reset(testing=True, options=options)
 
         terminated = False
@@ -599,8 +597,6 @@ def composite_input_optimization(
         ep_t = 0
         # simulate whole episode
         while not terminated:
-            obs = test._zero_feedback(obs)
-
             # Check if doing composite inputs
             composite_inp = torch.cat([inp1, inp2, inp3, inp4, inp5, inp6], dim=1)
             obs = _replace_rule_input(composite_inp, obs)
@@ -683,8 +679,6 @@ def test_sequential_inputs(
         Environment constructor. Should accept an effector keyword argument.
     stim : torch.Tensor, optional
         Tensor to silence or stimulate specific hidden units. Default is None.
-    feedback_mask : torch.Tensor, optional
-        Mask to ablate parts of the observation vector. Default is None.
     noise : bool, optional
         Whether to inject noise into the network. Default is False.
     noise_act : float, optional
@@ -709,9 +703,6 @@ def test_sequential_inputs(
     """
 
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-    extension_env = extension(effector=effector)
-    retraction_env = retraction(effector=effector)
-
     test = Test(
         model_path,
         model_name,
@@ -719,6 +710,8 @@ def test_sequential_inputs(
         noise_level_inp=noise_inp,
         device="cpu",
     )
+    extension_env = extension(effector=effector, zero_feedback=test.zero_feedback)
+    retraction_env = retraction(effector=effector, zero_feedback=test.zero_feedback)
     test.batch_size = options["batch_size"]
     policy = test.policy
 
@@ -754,8 +747,6 @@ def test_sequential_inputs(
     # simulate whole episode
     while not terminated:  # will run until `max_ep_duration` is reached
         with torch.no_grad():
-            obs = test._zero_feedback(obs)
-
             if timesteps < middle_movement:
                 obs = _replace_rule_input(extension_rule_input, obs)
 
