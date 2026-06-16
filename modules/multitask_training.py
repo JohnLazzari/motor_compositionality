@@ -275,7 +275,7 @@ class MultitaskTrainer:
             # saving model
             if batch % self.save_iter == 0:
                 # Get test loss
-                test_loss_envs, test_loss = self.eval(policy)
+                test_loss_envs, test_loss = self.eval(policy, env_dict=env_dict)
 
                 self._update_loss_dict(test_loss_envs, env_test_losses)
                 total_test_losses.append(test_loss)
@@ -306,7 +306,6 @@ class MultitaskTrainer:
         self,
         model_path,
         model_file,
-        env_dict=None,
         load_model=False,
         load_optim=False,
         load_model_path=None,
@@ -322,22 +321,14 @@ class MultitaskTrainer:
         self.training_mode = "kinematics"
         self.zero_feedback = True
         save_pickle(f"{model_path}/mult_train.pkl", self)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Training kinematics on device: {device}")
 
         if data_path is None:
             data_path = os.path.join(model_path, "muscle_act_data.pkl")
         muscle_data = load_pickle(data_path)
 
-        if env_dict is None:
-            env_list = list(muscle_data["tasks"])
-        else:
-            env_list = list(env_dict)
-        missing_envs = [
-            env_name for env_name in env_list if env_name not in muscle_data["tasks"]
-        ]
-        if missing_envs:
-            raise ValueError(f"Missing muscle data for environments: {missing_envs}")
+        env_list = list(muscle_data["tasks"])
 
         if probs is None:
             probs = [1 / len(env_list)] * len(env_list)
