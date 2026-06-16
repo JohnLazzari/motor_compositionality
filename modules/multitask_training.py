@@ -382,9 +382,9 @@ class MultitaskTrainer:
             if load_optim:
                 optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-        env_losses = self._empty_loss_dict()
+        env_losses = self._empty_loss_dict(env_list)
         total_losses = []
-        env_test_losses = self._empty_loss_dict()
+        env_test_losses = self._empty_loss_dict(env_list)
         total_test_losses = []
         interval = 100
         best_test_loss = np.inf
@@ -465,7 +465,7 @@ class MultitaskTrainer:
         direction_indices = np.arange(len(muscle_data["reach_conds"]))
         speed_conds = [int(speed) for speed in muscle_data["speed_conds"]]
         total_test_loss = 0
-        condition_losses = self._empty_loss_dict()
+        condition_losses = self._empty_loss_dict(env_list)
 
         for env_name in env_list:
             condition_loss = 0
@@ -532,7 +532,7 @@ class MultitaskTrainer:
         speed_conds = list(np.arange(0, 10))
 
         total_test_loss = 0
-        condition_losses = self._empty_loss_dict()
+        condition_losses = self._empty_loss_dict(env_dict)
 
         for env in env_dict:
             condition_loss = 0
@@ -639,10 +639,10 @@ class MultitaskTrainer:
 
         return update
 
-    def _empty_loss_dict(self):
+    def _empty_loss_dict(self, env_dict):
         # initialize loss lists
         env_losses = {}
-        for env in self.full_env_dict:
+        for env in env_dict:
             env_losses[env] = []
         return env_losses
 

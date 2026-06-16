@@ -495,7 +495,7 @@ def train_gru256():
 def train_rnn256_softplus_kinematics():
     mult_train = MultitaskTrainer(
         inp_size=14,
-        epochs=100_000,
+        epochs=250_000,
         l1_rate=1e-4,
         l1_weight=1e-4,
         simple_dynamics_weight=1e-4,
