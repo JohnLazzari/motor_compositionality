@@ -183,10 +183,10 @@ class MultitaskTrainer:
         env_list = [env for env in env_dict.keys()]
 
         # initialize loss lists
-        env_losses = self._empty_loss_dict()
+        env_losses = self._empty_loss_dict(env_dict)
         total_losses = []
 
-        env_test_losses = self._empty_loss_dict()
+        env_test_losses = self._empty_loss_dict(env_dict)
         total_test_losses = []
 
         interval = 100
