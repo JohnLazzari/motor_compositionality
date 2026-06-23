@@ -34,14 +34,15 @@ DEF_HP = {
     "dt": 10,
     "t_const": 20,
     "lr": 0.001,
-    "batch_size": 32,
-    "epochs": 75_000,
+    "batch_size": 4,
+    "epochs": 100_000,
     "save_iter": 500,
-    "l1_rate": 0.001,
-    "l1_weight": 0.001,
-    "l1_muscle_act": 0.01,
-    "simple_dynamics_weight": 0.001,
+    "l1_rate": 1e-3,
+    "l1_weight": 1e-3,
+    "l1_muscle_act": 1e-3,
+    "simple_dynamics_weight": 1e-3,
     "zero_feedback": False,
+    "single_env": False,
 }
 
 
@@ -70,6 +71,7 @@ class MultitaskTrainer:
         l1_muscle_act: float = DEF_HP["l1_muscle_act"],
         simple_dynamics_weight: float = DEF_HP["simple_dynamics_weight"],
         zero_feedback: bool = DEF_HP["zero_feedback"],
+        single_env: bool = DEF_HP["single_env"],
         save_model: bool = True,
     ):
         self.network = network
@@ -94,6 +96,7 @@ class MultitaskTrainer:
         self.l1_muscle_act_scale = l1_muscle_act
         self.simple_dynamics_weight = simple_dynamics_weight
         self.zero_feedback = zero_feedback
+        self.single_env = single_env
         self.save_model = save_model
         self.training_mode = "arm"
 
@@ -201,7 +204,9 @@ class MultitaskTrainer:
 
             env_name = random.choices(env_list, probs)[0]
             env = env_dict[env_name](
-                effector=effector, zero_feedback=self.zero_feedback
+                effector=effector,
+                zero_feedback=self.zero_feedback,
+                single_env=self.single_env,
             )
 
             # Get first timestep
@@ -334,17 +339,24 @@ class MultitaskTrainer:
             probs = [1 / len(env_list)] * len(env_list)
 
         train_direction_indices = self._even_condition_indices(
-            len(muscle_data["reach_conds"]), 8
+            len(muscle_data["reach_conds"]), 16
         )
         train_speed_conds = [
             int(muscle_data["speed_conds"][i])
-            for i in self._even_condition_indices(len(muscle_data["speed_conds"]), 3)
+            for i in self._even_condition_indices(len(muscle_data["speed_conds"]), 5)
         ]
 
         sample_env = env_list[0]
         sample_speed = train_speed_conds[0]
-        sample_obs = muscle_data["tasks"][sample_env][sample_speed]["obs"]
-        sample_target = muscle_data["tasks"][sample_env][sample_speed]["action"]
+        train_delay_conds = self._kinematic_delay_conds(
+            muscle_data, sample_env, sample_speed
+        )
+        sample_delay_cond = train_delay_conds[0]
+        sample_condition_data = self._kinematic_condition_data(
+            muscle_data, sample_env, sample_speed, sample_delay_cond
+        )
+        sample_obs = sample_condition_data["obs"]
+        sample_target = sample_condition_data["action"]
         if sample_obs.shape[-1] != self.inp_size:
             raise ValueError(
                 f"inp_size={self.inp_size} does not match supervised obs size {sample_obs.shape[-1]}"
@@ -392,9 +404,13 @@ class MultitaskTrainer:
         for batch in range(self.epochs):
             env_name = random.choices(env_list, probs)[0]
             speed = random.choice(train_speed_conds)
+            delay_cond = random.choice(train_delay_conds)
+            condition_data = self._kinematic_condition_data(
+                muscle_data, env_name, speed, delay_cond
+            )
             predictions, targets, hs = self._run_kinematic_trial(
                 policy,
-                muscle_data["tasks"][env_name][speed],
+                condition_data,
                 train_direction_indices,
                 device,
                 noise=True,
@@ -449,6 +465,7 @@ class MultitaskTrainer:
                             "data_path": data_path,
                             "train_direction_indices": train_direction_indices.tolist(),
                             "train_speed_conds": list(train_speed_conds),
+                            "train_delay_conds": list(train_delay_conds),
                         },
                         os.path.join(model_path, model_file),
                     )
@@ -469,19 +486,26 @@ class MultitaskTrainer:
 
         for env_name in env_list:
             condition_loss = 0
+            condition_count = 0
             for speed in speed_conds:
-                with torch.no_grad():
-                    predictions, targets, _ = self._run_kinematic_trial(
-                        policy,
-                        muscle_data["tasks"][env_name][speed],
-                        direction_indices,
-                        device,
-                        noise=False,
+                delay_conds = self._kinematic_delay_conds(muscle_data, env_name, speed)
+                for delay_cond in delay_conds:
+                    condition_data = self._kinematic_condition_data(
+                        muscle_data, env_name, speed, delay_cond
                     )
-                condition_loss += torch.nn.functional.mse_loss(
-                    predictions, targets
-                ).item()
-            condition_loss /= len(speed_conds)
+                    with torch.no_grad():
+                        predictions, targets, _ = self._run_kinematic_trial(
+                            policy,
+                            condition_data,
+                            direction_indices,
+                            device,
+                            noise=False,
+                        )
+                    condition_loss += torch.nn.functional.mse_loss(
+                        predictions, targets
+                    ).item()
+                    condition_count += 1
+            condition_loss /= condition_count
             condition_losses[env_name].append(condition_loss)
             total_test_loss += condition_loss
         total_test_loss /= len(env_list)
@@ -522,6 +546,22 @@ class MultitaskTrainer:
     def _even_condition_indices(num_conditions, num_samples):
         return np.linspace(0, num_conditions - 1, num_samples, dtype=int)
 
+    def _kinematic_delay_conds(self, muscle_data, env_name, speed):
+        speed_data = muscle_data["tasks"][env_name][int(speed)]
+        if "obs" in speed_data:
+            return [None]
+        if "delay_conds" in muscle_data:
+            return [int(delay_cond) for delay_cond in muscle_data["delay_conds"]]
+        return [int(delay_cond) for delay_cond in sorted(speed_data)]
+
+    def _kinematic_condition_data(self, muscle_data, env_name, speed, delay_cond):
+        speed_data = muscle_data["tasks"][env_name][int(speed)]
+        if "obs" in speed_data:
+            return speed_data
+        if delay_cond is None:
+            raise ValueError("delay_cond is required for nested muscle data")
+        return speed_data[int(delay_cond)]
+
     def eval(self, policy, env_dict=None):
         if env_dict is None:
             env_dict = self.full_env_dict
@@ -543,7 +583,9 @@ class MultitaskTrainer:
                 h = torch.zeros(size=(32, self.hid_size))
 
                 cur_env = env_dict[env](
-                    effector=effector, zero_feedback=self.zero_feedback
+                    effector=effector,
+                    zero_feedback=self.zero_feedback,
+                    single_env=self.single_env,
                 )
 
                 # Get first timestep

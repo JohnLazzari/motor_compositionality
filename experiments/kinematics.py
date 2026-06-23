@@ -17,7 +17,7 @@ import config
 import tqdm as tqdm
 from utils.exp_utils import env_dict, extension_dict, retraction_dict, load_pickle
 from modules.test import Test
-from experiments.muscle_act_data import load_supervised_model
+from experiments.muscle_act_data import iter_muscle_conditions, load_supervised_model
 from utils.plot_utils import save_fig, standard_2d_ax
 
 # Keep all the envs in case transfer to other envs in future
@@ -62,7 +62,7 @@ def _movement_time_for_condition(env_name, speed):
     raise ValueError(f"Unknown environment {env_name}")
 
 
-def _static_action_trial(actions, env, reach_conds, speed):
+def _static_action_trial(actions, env, reach_conds, speed, delay_cond=1):
     effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
     env = env(effector=effector)
     actions = torch.as_tensor(actions, dtype=torch.float32)
@@ -71,7 +71,7 @@ def _static_action_trial(actions, env, reach_conds, speed):
         "batch_size": actions.shape[0],
         "reach_conds": torch.as_tensor(reach_conds, dtype=torch.long),
         "speed_cond": int(speed),
-        "delay_cond": 1,
+        "delay_cond": int(delay_cond),
         "deterministic": True,
     }
     _, info = env.reset(testing=True, options=options)
@@ -111,36 +111,38 @@ def _plot_static_action_trials(exp_path, muscle_data, action_key, direction_step
 
     plt.rc("figure", figsize=(4, 4))
 
-    for env_name, speed_data in tqdm.tqdm(
-        muscle_data["tasks"].items(), desc=f"Plotting {action_key} kinematics"
+    for env_name, speed, delay_cond, data in tqdm.tqdm(
+        iter_muscle_conditions(muscle_data), desc=f"Plotting {action_key} kinematics"
     ):
-        for speed, data in speed_data.items():
-            actions = _to_numpy(data[action_key])[direction_indices]
-            selected_reach_conds = reach_conds[direction_indices]
+        actions = _to_numpy(data[action_key])[direction_indices]
+        selected_reach_conds = reach_conds[direction_indices]
+        trial_delay_cond = 1 if delay_cond is None else delay_cond
 
-            trial_data = _static_action_trial(
-                actions,
-                env_dict[env_name],
-                selected_reach_conds,
-                int(speed),
+        trial_data = _static_action_trial(
+            actions,
+            env_dict[env_name],
+            selected_reach_conds,
+            int(speed),
+            trial_delay_cond,
+        )
+
+        _, ax = standard_2d_ax()
+        colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0]))
+        for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
+            plot_kin_2d(
+                ax,
+                tg[trial_data["epoch_bounds"]["movement"][0]],
+                xy,
+                colors[i],
             )
 
-            _, ax = standard_2d_ax()
-            colors = plt.cm.inferno(np.linspace(0, 1, trial_data["xy"].shape[0]))
-            for i, (tg, xy) in enumerate(zip(trial_data["tg"], trial_data["xy"])):
-                plot_kin_2d(
-                    ax,
-                    tg[trial_data["epoch_bounds"]["movement"][0]],
-                    xy,
-                    colors[i],
-                )
-
-            save_fig(
-                os.path.join(
-                    exp_path, "scatter", f"{env_name}_speed{speed}_kinematics"
-                ),
-                eps=True,
-            )
+        suffix = f"{env_name}_speed{speed}"
+        if delay_cond is not None:
+            suffix = f"{suffix}_delay{delay_cond}"
+        save_fig(
+            os.path.join(exp_path, "scatter", f"{suffix}_kinematics"),
+            eps=True,
+        )
 
 
 def plot_saved_action_kinematics(model_name, direction_step=4):
@@ -164,9 +166,8 @@ def plot_kinematics_model_outputs(kinematics_model_name, direction_step=4):
         data_path = os.path.join("checkpoints", base_model_name, "muscle_act_data.pkl")
     muscle_data = load_pickle(data_path)
 
-    for speed_data in muscle_data["tasks"].values():
-        for data in speed_data.values():
-            data["model_output"] = _run_kinematics_model(model, data["obs"])
+    for _, _, _, data in iter_muscle_conditions(muscle_data):
+        data["model_output"] = _run_kinematics_model(model, data["obs"])
 
     exp_path = f"results/{kinematics_model_name}/kinematics/model_outputs"
     _plot_static_action_trials(exp_path, muscle_data, "model_output", direction_step)

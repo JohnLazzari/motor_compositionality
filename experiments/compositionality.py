@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from utils.compositionality_utils import (
-    get_mean_act,
+    get_epoch_act,
     dsa_similarity_matrix,
     epoch_pcs,
     composite_input_optimization,
@@ -41,125 +41,192 @@ plt.rcParams.update({"font.size": 18})  # Sets default font size for all text
 ################### PCA Axis Experiments ################################
 
 
-def stable_pcs_neural_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+def stable_pcs_neural_extension(
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
+):
     epoch_pcs(
         model_name,
         "stable",
         "extension",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def delay_pcs_neural_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+def delay_pcs_neural_extension(
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
+):
     epoch_pcs(
         model_name,
         "delay",
         "extension",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def movement_pcs_neural_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+def movement_pcs_neural_extension(
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
+):
     epoch_pcs(
         model_name,
         "extension",
         "extension",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def hold_pcs_neural_extension(model_name, add_new_rule_inputs=False, plot_3d=False):
+def hold_pcs_neural_extension(
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
+):
     epoch_pcs(
         model_name,
         "hold",
         "extension",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
 def stable_pcs_neural_extension_retraction(
-    model_name, add_new_rule_inputs=False, plot_3d=False
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "stable",
         "extension_retraction",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
 def delay_pcs_neural_extension_retraction(
-    model_name, add_new_rule_inputs=False, plot_3d=False
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "delay",
         "extension_retraction",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
 def extension_pcs_neural_extension_retraction(
-    model_name, add_new_rule_inputs=False, plot_3d=False
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "extension",
         "extension_retraction",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
 def retraction_pcs_neural_extension_retraction(
-    model_name, add_new_rule_inputs=False, plot_3d=False
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "retraction",
         "extension_retraction",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
 def hold_pcs_neural_extension_retraction(
-    model_name, add_new_rule_inputs=False, plot_3d=False
+    model_name, use_tdr=True, average=True, add_new_rule_inputs=False, plot_3d=False
 ):
     epoch_pcs(
         model_name,
         "hold",
         "extension_retraction",
         "h",
+        use_tdr=use_tdr,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
         plot_3d=plot_3d,
     )
 
 
-def run_all_neural_epoch_pcs(model_name):
-    stable_pcs_neural_extension(model_name)
+def run_all_neural_epoch_tdr(model_name):
     delay_pcs_neural_extension(model_name)
     movement_pcs_neural_extension(model_name)
-    hold_pcs_neural_extension(model_name)
-    stable_pcs_neural_extension_retraction(model_name)
-    delay_pcs_neural_extension_retraction(model_name)
-    extension_pcs_neural_extension_retraction(model_name)
-    retraction_pcs_neural_extension_retraction(model_name)
-    hold_pcs_neural_extension_retraction(model_name)
+
+
+def run_all_neural_epoch_pcs(model_name):
+    stable_pcs_neural_extension(model_name, use_tdr=False)
+    delay_pcs_neural_extension(model_name, use_tdr=False)
+    movement_pcs_neural_extension(model_name, use_tdr=False)
+    hold_pcs_neural_extension(model_name, use_tdr=False)
+    stable_pcs_neural_extension_retraction(model_name, use_tdr=False)
+    delay_pcs_neural_extension_retraction(model_name, use_tdr=False)
+    extension_pcs_neural_extension_retraction(model_name, use_tdr=False)
+    retraction_pcs_neural_extension_retraction(model_name, use_tdr=False)
+    hold_pcs_neural_extension_retraction(model_name, use_tdr=False)
+
+
+def run_all_neural_epoch_pcs_noaverage(model_name):
+    stable_pcs_neural_extension(model_name, average=False, use_tdr=False)
+    delay_pcs_neural_extension(model_name, average=False, use_tdr=False)
+    movement_pcs_neural_extension(model_name, average=False, use_tdr=False)
+    hold_pcs_neural_extension(model_name, average=False, use_tdr=False)
+    stable_pcs_neural_extension_retraction(model_name, average=False, use_tdr=False)
+    delay_pcs_neural_extension_retraction(model_name, average=False, use_tdr=False)
+    extension_pcs_neural_extension_retraction(model_name, average=False, use_tdr=False)
+    retraction_pcs_neural_extension_retraction(model_name, average=False, use_tdr=False)
+    hold_pcs_neural_extension_retraction(model_name, average=False, use_tdr=False)
+
+
+def run_all_neural_epoch_pcs_noaverage_3d(model_name):
+    stable_pcs_neural_extension(model_name, average=False, plot_3d=True, use_tdr=False)
+    delay_pcs_neural_extension(model_name, average=False, plot_3d=True, use_tdr=False)
+    movement_pcs_neural_extension(
+        model_name, average=False, plot_3d=True, use_tdr=False
+    )
+    hold_pcs_neural_extension(model_name, average=False, plot_3d=True, use_tdr=False)
+    stable_pcs_neural_extension_retraction(
+        model_name, average=False, plot_3d=True, use_tdr=False
+    )
+    delay_pcs_neural_extension_retraction(
+        model_name, average=False, plot_3d=True, use_tdr=False
+    )
+    extension_pcs_neural_extension_retraction(
+        model_name, average=False, plot_3d=True, use_tdr=False
+    )
+    retraction_pcs_neural_extension_retraction(
+        model_name, average=False, plot_3d=True, use_tdr=False
+    )
+    hold_pcs_neural_extension_retraction(
+        model_name, average=False, plot_3d=True, use_tdr=False
+    )
 
 
 def run_all_neural_epoch_pcs_transfer(model_name):
@@ -549,6 +616,12 @@ if __name__ == "__main__":
     # Epoch pcs
     if args.experiment == "run_all_neural_epoch_pcs":
         run_all_neural_epoch_pcs(args.model_name)
+    if args.experiment == "run_all_neural_epoch_tdr":
+        run_all_neural_epoch_tdr(args.model_name)
+    elif args.experiment == "run_all_neural_epoch_pcs_noaverage":
+        run_all_neural_epoch_pcs_noaverage(args.model_name)
+    elif args.experiment == "run_all_neural_epoch_pcs_noaverage_3d":
+        run_all_neural_epoch_pcs_noaverage_3d(args.model_name)
     elif args.experiment == "run_all_muscle_epoch_pcs":
         run_all_muscle_epoch_pcs(args.model_name)
 

@@ -25,41 +25,109 @@ def _obs_without_feedback(obs):
     return obs[:, :, :14]
 
 
+INDIVIDUAL_MODEL_ENV = {
+    "Reach": "rnn256_softplus_reach",
+    "ClkCurvedReach": "rnn256_softplus_clkcurvedreach",
+    "CClkCurvedReach": "rnn256_softplus_cclkcurvedreach",
+    "Sinusoid": "rnn256_softplus_sinusoid",
+    "InvSinusoid": "rnn256_softplus_invsinusoid",
+    "ReachBack": "rnn256_softplus_reachback",
+    "ClkCycle": "rnn256_softplus_clkcycle",
+    "CClkCycle": "rnn256_softplus_cclkcycle",
+    "Figure8": "rnn256_softplus_figure8",
+    "InvFigure8": "rnn256_softplus_invfigure8",
+}
+
+
 def collect_muscle_data(model_name):
-    """Collect muscle activity for every task, speed, and direction condition."""
+    """Collect muscle activity for every task, speed, delay, and direction condition."""
     model_path = f"checkpoints/{model_name}"
     test = Test(model_path, model_name)
 
     reach_conds = np.arange(0, 32)
     speed_conds = np.arange(0, 10)
+    delay_conds = np.arange(0, 3)
 
     muscle_data = {
         "model_name": model_name,
         "reach_conds": reach_conds,
         "speed_conds": speed_conds,
+        "delay_conds": delay_conds,
         "tasks": {},
     }
 
     for env_name, env in tqdm.tqdm(env_dict.items(), desc="Collecting muscle data"):
         muscle_data["tasks"][env_name] = {}
         for speed in speed_conds:
-            options = {
-                "batch_size": len(reach_conds),
-                "reach_conds": reach_conds,
-                "speed_cond": int(speed),
-                "deterministic": True,
-            }
-            trial_data = test.trial(options, env)
-            obs = trial_data["obs"]
-            if not test.zero_feedback:
-                obs = _obs_without_feedback(obs)
-            muscle_data["tasks"][env_name][int(speed)] = {
-                "muscle_acts": trial_data["muscle_acts"],
-                "action": trial_data["action"],
-                "obs": obs,
-            }
+            muscle_data["tasks"][env_name][int(speed)] = {}
+            for delay_cond in delay_conds:
+                options = {
+                    "batch_size": len(reach_conds),
+                    "reach_conds": reach_conds,
+                    "speed_cond": int(speed),
+                    "delay_cond": int(delay_cond),
+                    "deterministic": True,
+                }
+                trial_data = test.trial(options, env)
+                obs = trial_data["obs"]
+                if not test.zero_feedback:
+                    obs = _obs_without_feedback(obs)
+                muscle_data["tasks"][env_name][int(speed)][int(delay_cond)] = {
+                    "muscle_acts": trial_data["muscle_acts"],
+                    "action": trial_data["action"],
+                    "obs": obs,
+                }
 
     save_path = os.path.join(model_path, "muscle_act_data.pkl")
+    save_pickle(save_path, muscle_data)
+    return muscle_data
+
+
+def collect_muscle_data_individual():
+    """Collect muscle data from one task-specific RNN per matching environment."""
+    reach_conds = np.arange(0, 32)
+    speed_conds = np.arange(0, 10)
+    delay_conds = np.arange(0, 3)
+
+    muscle_data = {
+        "model_name": "individual_rnns",
+        "reach_conds": reach_conds,
+        "speed_conds": speed_conds,
+        "delay_conds": delay_conds,
+        "tasks": {},
+    }
+
+    for env_name, model_name in tqdm.tqdm(
+        INDIVIDUAL_MODEL_ENV.items(), desc="Collecting individual RNN muscle data"
+    ):
+        model_path = os.path.join("checkpoints", model_name)
+        test = Test(model_path, model_name)
+        env = env_dict[env_name]
+        muscle_data["tasks"][env_name] = {}
+
+        for speed in speed_conds:
+            muscle_data["tasks"][env_name][int(speed)] = {}
+            for delay_cond in delay_conds:
+                options = {
+                    "batch_size": len(reach_conds),
+                    "reach_conds": reach_conds,
+                    "speed_cond": int(speed),
+                    "delay_cond": int(delay_cond),
+                    "deterministic": True,
+                }
+                trial_data = test.trial(options, env)
+                obs = trial_data["obs"]
+                if not test.zero_feedback:
+                    obs = _obs_without_feedback(obs)
+                muscle_data["tasks"][env_name][int(speed)][int(delay_cond)] = {
+                    "muscle_acts": trial_data["muscle_acts"],
+                    "action": trial_data["action"],
+                    "obs": obs,
+                }
+
+    save_dir = "checkpoints/individual_rnns"
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, "muscle_act_data.pkl")
     save_pickle(save_path, muscle_data)
     return muscle_data
 
@@ -68,6 +136,16 @@ def _to_numpy(data):
     if hasattr(data, "detach"):
         return data.detach().cpu().numpy()
     return np.asarray(data)
+
+
+def iter_muscle_conditions(muscle_data):
+    for env_name, speed_data in muscle_data["tasks"].items():
+        for speed, condition_data in speed_data.items():
+            if "obs" in condition_data:
+                yield env_name, int(speed), None, condition_data
+            else:
+                for delay_cond, delay_data in condition_data.items():
+                    yield env_name, int(speed), int(delay_cond), delay_data
 
 
 def load_supervised_model(model_name, device="cpu"):
@@ -149,56 +227,57 @@ def plot_supervised_outputs(loaded_model, muscle_data, model_name=None):
     save_path = os.path.join("results", model_name, "outputs")
     reach_conds = _to_numpy(muscle_data.get("reach_conds", []))
 
-    for env_name, speed_data in tqdm.tqdm(
-        muscle_data["tasks"].items(), desc="Plotting supervised outputs"
+    for env_name, speed, delay_cond, data in tqdm.tqdm(
+        iter_muscle_conditions(muscle_data), desc="Plotting supervised outputs"
     ):
-        for speed, data in speed_data.items():
-            obs = _to_numpy(data["obs"])
-            targets = _to_numpy(data["action"])
-            outputs = _predict_supervised_outputs(loaded_model, obs)
-            condition_dir = os.path.join(save_path, env_name, f"speed_{speed}")
+        obs = _to_numpy(data["obs"])
+        targets = _to_numpy(data["action"])
+        outputs = _predict_supervised_outputs(loaded_model, obs)
+        condition_dir = os.path.join(save_path, env_name, f"speed_{speed}")
+        condition_title = f"{env_name} speed {speed}"
+        if delay_cond is not None:
+            condition_dir = os.path.join(condition_dir, f"delay_{delay_cond}")
+            condition_title = f"{condition_title} delay {delay_cond}"
 
-            colors = plt.cm.tab10(np.linspace(0, 1, targets.shape[-1]))
-            for direction_idx in range(targets.shape[0]):
-                if len(reach_conds) > direction_idx:
-                    direction_label = int(reach_conds[direction_idx])
-                else:
-                    direction_label = direction_idx
+        colors = plt.cm.tab10(np.linspace(0, 1, targets.shape[-1]))
+        for direction_idx in range(targets.shape[0]):
+            if len(reach_conds) > direction_idx:
+                direction_label = int(reach_conds[direction_idx])
+            else:
+                direction_label = direction_idx
 
-                fig, axes = plt.subplots(
-                    targets.shape[-1],
-                    1,
-                    figsize=(8, 1.6 * targets.shape[-1] + 1.5),
-                    sharex=True,
+            fig, axes = plt.subplots(
+                targets.shape[-1],
+                1,
+                figsize=(8, 1.6 * targets.shape[-1] + 1.5),
+                sharex=True,
+            )
+            axes = np.atleast_1d(axes)
+
+            for output_idx, (ax, color) in enumerate(zip(axes, colors)):
+                ax.plot(
+                    targets[direction_idx, :, output_idx],
+                    color=color,
+                    linestyle=":",
+                    linewidth=2,
+                    label="target",
                 )
-                axes = np.atleast_1d(axes)
-
-                for output_idx, (ax, color) in enumerate(zip(axes, colors)):
-                    ax.plot(
-                        targets[direction_idx, :, output_idx],
-                        color=color,
-                        linestyle=":",
-                        linewidth=2,
-                        label="target",
-                    )
-                    ax.plot(
-                        outputs[direction_idx, :, output_idx],
-                        color=color,
-                        linewidth=2,
-                        label="model",
-                    )
-                    ax.set_ylabel(
-                        f"out {output_idx}", rotation=0, labelpad=25, va="center"
-                    )
-                    ax.spines["top"].set_visible(False)
-                    ax.spines["right"].set_visible(False)
-
-                axes[0].legend(frameon=False, ncol=2, fontsize=8)
-                axes[-1].set_xlabel("timestep")
-                fig.suptitle(f"{env_name} speed {speed} direction {direction_label}")
-                save_fig(
-                    os.path.join(condition_dir, f"direction_{direction_label}_outputs")
+                ax.plot(
+                    outputs[direction_idx, :, output_idx],
+                    color=color,
+                    linewidth=2,
+                    label="model",
                 )
+                ax.set_ylabel(f"out {output_idx}", rotation=0, labelpad=25, va="center")
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+
+            axes[0].legend(frameon=False, ncol=2, fontsize=8)
+            axes[-1].set_xlabel("timestep")
+            fig.suptitle(f"{condition_title} direction {direction_label}")
+            save_fig(
+                os.path.join(condition_dir, f"direction_{direction_label}_outputs")
+            )
 
 
 def plot_muscle_data(model_name):
@@ -207,66 +286,70 @@ def plot_muscle_data(model_name):
     muscle_data = load_pickle(os.path.join(model_path, "muscle_act_data.pkl"))
     save_path = os.path.join("results", "supervised_data", model_name)
 
-    for env_name, speed_data in tqdm.tqdm(
-        muscle_data["tasks"].items(), desc="Plotting muscle data"
+    for env_name, speed, delay_cond, data in tqdm.tqdm(
+        iter_muscle_conditions(muscle_data), desc="Plotting muscle data"
     ):
-        for speed, data in speed_data.items():
-            obs = _to_numpy(data["obs"])
-            muscle_acts = _to_numpy(data["muscle_acts"])
+        obs = _to_numpy(data["obs"])
+        muscle_acts = _to_numpy(data["muscle_acts"])
 
-            n_inputs = obs.shape[-1]
-            n_scalar_inputs = n_inputs - 10
-            fig, axes = plt.subplots(
-                n_scalar_inputs + 2,
-                1,
-                figsize=(8, 1.2 * n_scalar_inputs + 5),
-                gridspec_kw={"height_ratios": [2] + [1] * n_scalar_inputs + [2]},
-                sharex=True,
+        n_inputs = obs.shape[-1]
+        n_scalar_inputs = n_inputs - 10
+        fig, axes = plt.subplots(
+            n_scalar_inputs + 2,
+            1,
+            figsize=(8, 1.2 * n_scalar_inputs + 5),
+            gridspec_kw={"height_ratios": [2] + [1] * n_scalar_inputs + [2]},
+            sharex=True,
+        )
+        rule_ax = axes[0]
+        input_axes = axes[1:-1]
+        muscle_ax = axes[-1]
+
+        rule_ax.imshow(obs[:, :, :10].mean(axis=0).T, cmap="Purples", aspect="auto")
+        rule_ax.set_ylabel("rule", rotation=0, labelpad=25, va="center")
+        rule_ax.set_yticks(np.arange(10))
+        rule_ax.set_xticks([])
+        rule_ax.spines["top"].set_visible(False)
+        rule_ax.spines["right"].set_visible(False)
+        rule_ax.spines["bottom"].set_visible(False)
+
+        for input_idx, ax in enumerate(input_axes, start=10):
+            ax.plot(obs[:, :, input_idx].T, color="0.75", linewidth=0.8, alpha=0.35)
+            ax.plot(
+                obs[:, :, input_idx].mean(axis=0),
+                color="black",
+                linewidth=1.5,
             )
-            rule_ax = axes[0]
-            input_axes = axes[1:-1]
-            muscle_ax = axes[-1]
+            ax.set_ylabel(f"inp {input_idx}", rotation=0, labelpad=25, va="center")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+        colors = plt.cm.tab10(np.linspace(0, 1, muscle_acts.shape[-1]))
+        for muscle_idx, color in enumerate(colors):
+            muscle_ax.plot(
+                muscle_acts[:, :, muscle_idx].T,
+                color=color,
+                linewidth=0.6,
+                alpha=0.12,
+            )
+            muscle_ax.plot(
+                muscle_acts[:, :, muscle_idx].mean(axis=0),
+                color=color,
+                linewidth=2,
+                label=f"muscle {muscle_idx}",
+            )
+        muscle_ax.set_ylabel("muscle", rotation=0, labelpad=25, va="center")
+        muscle_ax.set_xlabel("timestep")
+        muscle_ax.spines["top"].set_visible(False)
+        muscle_ax.spines["right"].set_visible(False)
+        muscle_ax.legend(frameon=False, ncol=3, fontsize=8)
 
-            rule_ax.imshow(obs[:, :, :10].mean(axis=0).T, cmap="Purples", aspect="auto")
-            rule_ax.set_ylabel("rule", rotation=0, labelpad=25, va="center")
-            rule_ax.set_yticks(np.arange(10))
-            rule_ax.set_xticks([])
-            rule_ax.spines["top"].set_visible(False)
-            rule_ax.spines["right"].set_visible(False)
-            rule_ax.spines["bottom"].set_visible(False)
-
-            for input_idx, ax in enumerate(input_axes, start=10):
-                ax.plot(obs[:, :, input_idx].T, color="0.75", linewidth=0.8, alpha=0.35)
-                ax.plot(
-                    obs[:, :, input_idx].mean(axis=0),
-                    color="black",
-                    linewidth=1.5,
-                )
-                ax.set_ylabel(f"inp {input_idx}", rotation=0, labelpad=25, va="center")
-                ax.spines["top"].set_visible(False)
-                ax.spines["right"].set_visible(False)
-            colors = plt.cm.tab10(np.linspace(0, 1, muscle_acts.shape[-1]))
-            for muscle_idx, color in enumerate(colors):
-                muscle_ax.plot(
-                    muscle_acts[:, :, muscle_idx].T,
-                    color=color,
-                    linewidth=0.6,
-                    alpha=0.12,
-                )
-                muscle_ax.plot(
-                    muscle_acts[:, :, muscle_idx].mean(axis=0),
-                    color=color,
-                    linewidth=2,
-                    label=f"muscle {muscle_idx}",
-                )
-            muscle_ax.set_ylabel("muscle", rotation=0, labelpad=25, va="center")
-            muscle_ax.set_xlabel("timestep")
-            muscle_ax.spines["top"].set_visible(False)
-            muscle_ax.spines["right"].set_visible(False)
-            muscle_ax.legend(frameon=False, ncol=3, fontsize=8)
-
-            fig.suptitle(f"{env_name} speed {speed}")
-            save_fig(os.path.join(save_path, f"{env_name}_speed{speed}"))
+        suffix = f"{env_name}_speed{speed}"
+        title = f"{env_name} speed {speed}"
+        if delay_cond is not None:
+            suffix = f"{suffix}_delay{delay_cond}"
+            title = f"{title} delay {delay_cond}"
+        fig.suptitle(title)
+        save_fig(os.path.join(save_path, suffix))
 
 
 if __name__ == "__main__":
@@ -275,6 +358,8 @@ if __name__ == "__main__":
 
     if args.experiment == "collect_muscle_data":
         collect_muscle_data(args.model_name)
+    elif args.experiment == "collect_muscle_data_individual":
+        collect_muscle_data_individual()
     elif args.experiment == "plot_muscle_data":
         plot_muscle_data(args.model_name)
     elif args.experiment == "plot_supervised_outputs":

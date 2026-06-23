@@ -27,6 +27,7 @@ class Test:
         device="cpu",
         add_new_rule_inputs=False,
         num_new_inputs=10,
+        single_env=None,
     ):
         """
         Trial object, stores functions to run a single trial and get data
@@ -70,6 +71,12 @@ class Test:
         self.zero_feedback = getattr(mult_train, "zero_feedback", False)
         if self.zero_feedback is None:
             self.zero_feedback = False
+        if single_env is None:
+            self.single_env = getattr(mult_train, "single_env", False)
+        else:
+            self.single_env = single_env
+        if self.single_env is None:
+            self.single_env = False
         self.device = device
         self.add_new_rule_inputs = add_new_rule_inputs
         self.num_new_inputs = num_new_inputs
@@ -155,7 +162,11 @@ class Test:
         """
 
         effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
-        env = env(effector=effector, zero_feedback=self.zero_feedback)
+        env = env(
+            effector=effector,
+            zero_feedback=self.zero_feedback,
+            single_env=self.single_env,
+        )
 
         self.batch_size = options["batch_size"]
 
@@ -303,6 +314,7 @@ class Test:
                     "delay"
                 ][1],
             ]
+
         elif epoch == "movement":
             env_h = trial_data[mode][
                 :,

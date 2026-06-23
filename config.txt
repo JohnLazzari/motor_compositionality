@@ -1,2 +1,2 @@
 model_name=rnn256_softplus_kinematics
-experiment=plot_kinematics_model_outputs
+experiment=run_all_neural_epoch_tdr

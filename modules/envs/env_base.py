@@ -22,6 +22,9 @@ class MotornetEnv(env.Environment):
         self.zero_feedback = kwargs.pop("zero_feedback", False)
         if type(self.zero_feedback) is not bool:
             raise TypeError("zero_feedback must be a boolean")
+        self.single_env = kwargs.pop("single_env", False)
+        if type(self.single_env) is not bool:
+            raise TypeError("single_env must be a boolean")
         self.stable_time = 25
         self.hold_time = 25
         super().__init__(*args, **kwargs)
@@ -49,12 +52,16 @@ class MotornetEnv(env.Environment):
 
         assert self.go_cue is not None
 
-        obs_as_list = [
-            self.rule_input,
-            self.speed_scalar[:, t],
-            self.go_cue[:, t],
-            self.vis_inp[:, t],
-        ]
+        obs_as_list = []
+        if not self.single_env:
+            obs_as_list.append(self.rule_input)
+        obs_as_list.extend(
+            [
+                self.speed_scalar[:, t],
+                self.go_cue[:, t],
+                self.vis_inp[:, t],
+            ]
+        )
         if not self.zero_feedback:
             obs_as_list.append(self.obs_buffer["vision"][0])
             obs_as_list.append(self.obs_buffer["proprioception"][0])
@@ -71,7 +78,7 @@ class MotornetEnv(env.Environment):
         return obs if self.differentiable else self.detach(obs)
 
     def _get_obs_size(self):
-        base_size = 14
+        base_size = 4 if self.single_env else 14
         feedback_size = 0
         if not self.zero_feedback:
             feedback_size += self.skeleton.space_dim
@@ -286,7 +293,7 @@ class MotornetEnv(env.Environment):
         """Return the direction grid used for train or test resets."""
         if testing:
             return th.linspace(0, 2 * np.pi, 33)[:-1]
-        return th.linspace(0, 2 * np.pi, 9)[:-1]
+        return th.linspace(0, 2 * np.pi, 17)[:-1]
 
     def _condition_indices(self, reach_conds, num_conditions, batch_size):
         """Return condition indices from explicit options or random sampling."""
@@ -386,15 +393,13 @@ class MotornetEnv(env.Environment):
 
     def _supervised_observations(self, inp_size):
         """Build observations with arm feedback and previous-action inputs set to zero."""
-        obs = th.cat(
-            [
-                self.rule_input[:, None, :].repeat(1, self.speed_scalar.shape[1], 1),
-                self.speed_scalar,
-                self.go_cue,
-                self.vis_inp,
-            ],
-            dim=-1,
-        )
+        obs_parts = []
+        if not getattr(self, "single_env", False):
+            obs_parts.append(
+                self.rule_input[:, None, :].repeat(1, self.speed_scalar.shape[1], 1)
+            )
+        obs_parts.extend([self.speed_scalar, self.go_cue, self.vis_inp])
+        obs = th.cat(obs_parts, dim=-1)
         if obs.shape[-1] > inp_size:
             raise ValueError(
                 f"inp_size must be at least {obs.shape[-1]} for kinematic training"
@@ -413,11 +418,13 @@ class MotornetEnv(env.Environment):
         delay_cond=None,
         custom_delay=None,
         inp_size=28,
+        single_env=False,
     ):
         """Generate task inputs and xy targets without constructing an arm."""
         task = cls.__new__(cls)
         task.stable_time = 25
         task.hold_time = 25
+        task.single_env = single_env
         fingertip = th.zeros(size=(batch_size, 2))
         task._configure_task(
             batch_size,

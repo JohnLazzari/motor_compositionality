@@ -249,6 +249,54 @@ def plot_pca3d(model_name, epoch, system, condition):
         )
 
 
+def plot_mean_trial_activity(model_name, speed_cond=5, delay_cond=1):
+    """Plot mean hidden activity across units over the full trial for each direction."""
+    exp_path = f"results/{model_name}/psth"
+    model_path = f"checkpoints/{model_name}"
+    test = Test(model_path, model_name)
+
+    for env in env_dict:
+        options = _direction_batches(32, speed_cond=speed_cond)
+        options["delay_cond"] = delay_cond
+        trial_data = test.trial(options, env_dict[env])
+        mean_activity = trial_data["h"].mean(dim=-1).detach().cpu().numpy()
+        colors = plt.cm.inferno(np.linspace(0, 1, mean_activity.shape[0]))
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+        timesteps = np.arange(mean_activity.shape[1])
+        for direction_idx, activity in enumerate(mean_activity):
+            ax.plot(
+                timesteps,
+                activity,
+                color=colors[direction_idx],
+                linewidth=4,
+                alpha=0.75,
+            )
+
+        epoch_bounds = trial_data["epoch_bounds"]
+        for epoch in ("stable", "delay", "movement", "hold"):
+            epoch_end = epoch_bounds[epoch][1]
+            if 0 < epoch_end < mean_activity.shape[1]:
+                ax.axvline(epoch_end, color="grey", linestyle=":", linewidth=2)
+
+        ax.set_xlabel("Timestep")
+        ax.set_ylabel("Mean hidden activity")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        fig.patch.set_facecolor("white")
+        ax.set_facecolor("white")
+
+        save_fig(
+            os.path.join(
+                exp_path,
+                f"speed_{speed_cond}",
+                f"delay_{delay_cond}",
+                f"{env}_mean_activity",
+            ),
+            eps=True,
+        )
+
+
 def plot_jpcs(model_name, epoch):
     exp_path = f"results/{model_name}/pca"
 

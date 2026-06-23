@@ -24,8 +24,8 @@ class ClkCycle(MotornetEnv):
             speed_cond,
             delay_cond,
             custom_delay,
-            train_movement_times=[100, 200, 300],
-            test_movement_times=list(np.arange(100, 300, 20)),
+            train_movement_times=list(np.arange(100, 300, 5)),
+            test_movement_times=list(np.arange(100, 300, 10)),
             speed_denominator=300,
             set_half_movement=True,
         )

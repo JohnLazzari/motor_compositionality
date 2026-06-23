@@ -28,6 +28,226 @@ import config
 import tqdm as tqdm
 
 
+def train_rnn256_softplus_reach():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "Reach": Reach,
+    }
+    model_path = "checkpoints/rnn256_softplus_reach"
+    model_file = "rnn256_softplus_reach.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS REACH")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_clkcurvedreach():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "ClkCurvedReach": ClkCurvedReach,
+    }
+    model_path = "checkpoints/rnn256_softplus_clkcurvedreach"
+    model_file = "rnn256_softplus_clkcurvedreach.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS CLKCURVEDREACH")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_cclkcurvedreach():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "CClkCurvedReach": CClkCurvedReach,
+    }
+    model_path = "checkpoints/rnn256_softplus_cclkcurvedreach"
+    model_file = "rnn256_softplus_cclkcurvedreach.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS CCLKCURVEDREACH")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_sinusoid():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "Sinusoid": Sinusoid,
+    }
+    model_path = "checkpoints/rnn256_softplus_sinusoid"
+    model_file = "rnn256_softplus_sinusoid.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS Sinusoid")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_invsinusoid():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "InvSinusoid": InvSinusoid,
+    }
+    model_path = "checkpoints/rnn256_softplus_invsinusoid"
+    model_file = "rnn256_softplus_invsinusoid.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS InvSinusoid")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_reachback():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "ReachBack": ReachBack,
+    }
+    model_path = "checkpoints/rnn256_softplus_reachback"
+    model_file = "rnn256_softplus_reachback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS REACHBACK")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_clkcycle():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "ClkCycle": ClkCycle,
+    }
+    model_path = "checkpoints/rnn256_softplus_clkcycle"
+    model_file = "rnn256_softplus_clkcycle.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS CLKCYCLE")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_cclkcycle():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "CClkCycle": CClkCycle,
+    }
+    model_path = "checkpoints/rnn256_softplus_cclkcycle"
+    model_file = "rnn256_softplus_cclkcycle.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS CCLKCYCLE")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_figure8():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "Figure8": Figure8,
+    }
+    model_path = "checkpoints/rnn256_softplus_figure8"
+    model_file = "rnn256_softplus_figure8.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS FIGURE8")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_invfigure8():
+    mult_train = MultitaskTrainer(single_env=True, inp_size=18)
+    env_dict = {
+        "InvFigure8": InvFigure8,
+    }
+    model_path = "checkpoints/rnn256_softplus_invfigure8"
+    model_file = "rnn256_softplus_invfigure8.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS InvFIGURE8")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_reach_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "Reach": Reach,
+    }
+    model_path = "checkpoints/rnn256_softplus_reach_nofeedback"
+    model_file = "rnn256_softplus_reach_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS REACH no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_clkcurvedreach_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "ClkCurvedReach": ClkCurvedReach,
+    }
+    model_path = "checkpoints/rnn256_softplus_clkcurvedreach_nofeedback"
+    model_file = "rnn256_softplus_clkcurvedreach_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS CLKCURVEDREACH no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_cclkcurvedreach_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "CClkCurvedReach": CClkCurvedReach,
+    }
+    model_path = "checkpoints/rnn256_softplus_cclkcurvedreach_nofeedback"
+    model_file = "rnn256_softplus_cclkcurvedreach_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS CCLKCURVEDREACH no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_sinusoid_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "Sinusoid": Sinusoid,
+    }
+    model_path = "checkpoints/rnn256_softplus_sinusoid_nofeedback"
+    model_file = "rnn256_softplus_sinusoid_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS Sinusoid no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_invsinusoid_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "InvSinusoid": InvSinusoid,
+    }
+    model_path = "checkpoints/rnn256_softplus_invsinusoid_nofeedback"
+    model_file = "rnn256_softplus_invsinusoid_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS InvSinusoid no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_reachback_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "ReachBack": ReachBack,
+    }
+    model_path = "checkpoints/rnn256_softplus_reachback_nofeedback"
+    model_file = "rnn256_softplus_reachback_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS REACHBACK no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_clkcycle_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "ClkCycle": ClkCycle,
+    }
+    model_path = "checkpoints/rnn256_softplus_clkcycle_nofeedback"
+    model_file = "rnn256_softplus_clkcycle_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS CLKCYCLE no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_cclkcycle_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "CClkCycle": CClkCycle,
+    }
+    model_path = "checkpoints/rnn256_softplus_cclkcycle_nofeedback"
+    model_file = "rnn256_softplus_cclkcycle_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS CCLKCYCLE no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_figure8_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "Figure8": Figure8,
+    }
+    model_path = "checkpoints/rnn256_softplus_figure8_nofeedback"
+    model_file = "rnn256_softplus_figure8_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS FIGURE8 no feedback")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
+def train_rnn256_softplus_invfigure8_nofeedback():
+    mult_train = MultitaskTrainer(zero_feedback=True, single_env=True, inp_size=4)
+    env_dict = {
+        "InvFigure8": InvFigure8,
+    }
+    model_path = "checkpoints/rnn256_softplus_invfigure8_nofeedback"
+    model_file = "rnn256_softplus_invfigure8_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS InvFIGURE8 NO FEEDBACK")
+    mult_train.train(model_path, model_file, env_dict=env_dict)
+
+
 def run_train_subsets_all_base_model():
     """
     This will run training on a subset of the environments with sinusoidinv and figure8inv held out
@@ -493,16 +713,10 @@ def train_gru256():
 
 
 def train_rnn256_softplus_kinematics():
-    mult_train = MultitaskTrainer(
-        inp_size=14,
-        epochs=250_000,
-        l1_rate=1e-4,
-        l1_weight=1e-4,
-        simple_dynamics_weight=1e-4,
-    )
+    mult_train = MultitaskTrainer(inp_size=14, hid_size=256)
     model_path = "checkpoints/rnn256_softplus_kinematics"
     model_file = "rnn256_softplus_kinematics.pth"
-    data_path = "checkpoints/rnn256_softplus/muscle_act_data.pkl"
+    data_path = "checkpoints/individual_rnns/muscle_act_data.pkl"
     print("TRAINING RNN ON SUPERVISED MUSCLE ACTIVITY")
     mult_train.train_kinematics(model_path, model_file, data_path=data_path)
 
@@ -586,6 +800,48 @@ if __name__ == "__main__":
         run_train_subsets_cr_held_out_base_model()
     elif args.experiment == "run_train_subsets_sin_held_out_base_model":
         run_train_subsets_sin_held_out_base_model()
+
+    elif args.experiment == "train_rnn256_softplus_reach":
+        train_rnn256_softplus_reach()
+    elif args.experiment == "train_rnn256_softplus_clkcurvedreach":
+        train_rnn256_softplus_clkcurvedreach()
+    elif args.experiment == "train_rnn256_softplus_cclkcurvedreach":
+        train_rnn256_softplus_cclkcurvedreach()
+    elif args.experiment == "train_rnn256_softplus_sinusoid":
+        train_rnn256_softplus_sinusoid()
+    elif args.experiment == "train_rnn256_softplus_invsinusoid":
+        train_rnn256_softplus_invsinusoid()
+    elif args.experiment == "train_rnn256_softplus_reachback":
+        train_rnn256_softplus_reachback()
+    elif args.experiment == "train_rnn256_softplus_clkcycle":
+        train_rnn256_softplus_clkcycle()
+    elif args.experiment == "train_rnn256_softplus_cclkcycle":
+        train_rnn256_softplus_cclkcycle()
+    elif args.experiment == "train_rnn256_softplus_figure8":
+        train_rnn256_softplus_figure8()
+    elif args.experiment == "train_rnn256_softplus_invfigure8":
+        train_rnn256_softplus_invfigure8()
+
+    elif args.experiment == "train_rnn256_softplus_reach_nofeedback":
+        train_rnn256_softplus_reach_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_clkcurvedreach_nofeedback":
+        train_rnn256_softplus_clkcurvedreach_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_cclkcurvedreach_nofeedback":
+        train_rnn256_softplus_cclkcurvedreach_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_sinusoid_nofeedback":
+        train_rnn256_softplus_sinusoid_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_invsinusoid_nofeedback":
+        train_rnn256_softplus_invsinusoid_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_reachback_nofeedback":
+        train_rnn256_softplus_reachback_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_clkcycle_nofeedback":
+        train_rnn256_softplus_clkcycle_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_cclkcycle_nofeedback":
+        train_rnn256_softplus_cclkcycle_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_figure8_nofeedback":
+        train_rnn256_softplus_figure8_nofeedback()
+    elif args.experiment == "train_rnn256_softplus_invfigure8_nofeedback":
+        train_rnn256_softplus_invfigure8_nofeedback()
 
     else:
         raise ValueError("Experiment not in this file")

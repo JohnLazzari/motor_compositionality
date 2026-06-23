@@ -24,7 +24,7 @@ class InvSinusoid(MotornetEnv):
             speed_cond,
             delay_cond,
             custom_delay,
-            train_movement_times=[50, 100, 150],
+            train_movement_times=list(np.arange(50, 150, 5)),
             test_movement_times=list(np.arange(50, 150, 10)),
             speed_denominator=150,
         )

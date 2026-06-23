@@ -26,6 +26,7 @@ from utils.exp_utils import (
     load_pickle,
     extension_dict,
     retraction_dict,
+    interpolate_trial,
 )
 import itertools
 import seaborn as sns
@@ -45,15 +46,282 @@ from utils.plot_utils import (
 plt.rcParams.update({"font.size": 18})  # Sets default font size for all text
 
 
-def get_mean_act(
+TDR_ROTATION_VALUES = {
+    "Reach": 0,
+    "ReachBack": 0,
+    "ClkCurvedReach": 1,
+    "ClkCycle": 1,
+    "Sinusoid": 1,
+    "Figure8": 1,
+    "CClkCurvedReach": -1,
+    "CClkCycle": -1,
+    "InvSinusoid": -1,
+    "InvFigure8": -1,
+}
+
+TDR_FREQUENCY_VALUES = {
+    "Reach": -1,
+    "ReachBack": -1,
+    "ClkCurvedReach": 0,
+    "CClkCurvedReach": 0,
+    "ClkCycle": 0,
+    "CClkCycle": 0,
+    "Sinusoid": 1,
+    "InvSinusoid": 1,
+    "Figure8": 1,
+    "InvFigure8": 1,
+}
+
+TDR_VARIABLE_NAMES = ["rotation", "frequency", "speed", "direction", "bias"]
+
+
+def _tdr_scaled_direction(direction_cond, num_directions=32):
+    return -1 + 2 * (direction_cond / (num_directions - 1))
+
+
+def _tdr_scaled_speed(speed_cond, num_speeds=10):
+    return -1 + 2 * (speed_cond / (num_speeds - 1))
+
+
+def _tdr_gather_h(model_name, delay_cond=2):
+    model_path = f"checkpoints/{model_name}"
+    test = Test(model_path, model_name)
+    trial_activity = {}
+
+    for env_name, env in tqdm.tqdm(env_dict.items(), desc="Gathering TDR activity"):
+        trial_activity[env_name] = {}
+        for speed_cond in range(10):
+            options = {
+                "batch_size": 32,
+                "reach_conds": np.arange(0, 32),
+                "speed_cond": speed_cond,
+                "delay_cond": delay_cond,
+                "deterministic": True,
+            }
+            trial_data = test.trial(options, env)
+            trial_activity[env_name][speed_cond] = {
+                "h": trial_data["h"].detach().cpu(),
+                "epoch_bounds": trial_data["epoch_bounds"],
+            }
+
+    return trial_activity
+
+
+def _tdr_epoch_activity(trial_data, epoch):
+    if epoch not in ("delay", "movement"):
+        raise ValueError("epoch must be 'delay' or 'movement'")
+
+    start, end = trial_data["epoch_bounds"][epoch]
+    return trial_data["h"][:, start:end]
+
+
+def _tdr_make_F(trial_metadata):
+    F = torch.ones(size=(5, len(trial_metadata)), dtype=torch.float32)
+
+    for col, metadata in enumerate(trial_metadata):
+        env_name = metadata["env"]
+        speed_cond = metadata["speed_cond"]
+        direction_cond = metadata["direction_cond"]
+        F[0, col] = TDR_ROTATION_VALUES[env_name]
+        F[1, col] = TDR_FREQUENCY_VALUES[env_name]
+        F[2, col] = _tdr_scaled_speed(speed_cond)
+        F[3, col] = _tdr_scaled_direction(direction_cond)
+        F[4, col] = 1
+
+    return F
+
+
+def _tdr_make_r(trial_activity, epoch, movement_target_len=None):
+    epoch_trials = []
+    trial_metadata = []
+    epoch_lengths = []
+
+    for speed_data in trial_activity.values():
+        for trial_data in speed_data.values():
+            epoch_lengths.append(_tdr_epoch_activity(trial_data, epoch).shape[1])
+
+    if len(set(epoch_lengths)) == 1:
+        target_len = epoch_lengths[0]
+    elif epoch == "movement":
+        target_len = (
+            max(epoch_lengths) if movement_target_len is None else movement_target_len
+        )
+    else:
+        raise ValueError(
+            f"{epoch} activity has inconsistent lengths: {sorted(set(epoch_lengths))}"
+        )
+
+    for env_name, speed_data in trial_activity.items():
+        for speed_cond, trial_data in speed_data.items():
+            epoch_h = _tdr_epoch_activity(trial_data, epoch)
+            for direction_cond in range(epoch_h.shape[0]):
+                trial_h = epoch_h[direction_cond]
+                if trial_h.shape[0] != target_len:
+                    trial_h = interpolate_trial(trial_h, target_len).to(
+                        dtype=torch.float32
+                    )
+                else:
+                    trial_h = trial_h.to(dtype=torch.float32)
+                epoch_trials.append(trial_h)
+                trial_metadata.append(
+                    {
+                        "env": env_name,
+                        "speed_cond": speed_cond,
+                        "direction_cond": direction_cond,
+                    }
+                )
+
+    r = torch.stack(epoch_trials, dim=-1).permute(1, 0, 2).contiguous()
+    return r, trial_metadata
+
+
+def _tdr_fit_coefficients(F, r):
+    decoder = torch.linalg.pinv(F @ F.T) @ F
+    B = torch.einsum("fn,htn->htf", decoder, r)
+    return B
+
+
+def _tdr_reduce_coefficients(B, r, n_components=12):
+    hidden_size = r.shape[0]
+    pca = PCA(n_components=n_components)
+    pca.fit(r.permute(2, 1, 0).reshape((-1, hidden_size)).numpy())
+
+    # B contains direction vectors, not activity points, so project through the
+    # PCA basis without subtracting the PCA data mean.
+    B_hidden = B.reshape((-1, hidden_size)).detach().cpu().numpy()
+    B_reduced = B_hidden @ pca.components_.T
+    B_reduced = torch.as_tensor(
+        B_reduced.reshape((B.shape[0], B.shape[1], n_components)),
+        dtype=torch.float32,
+    )
+    return B_reduced, pca
+
+
+def _tdr_max_norm_timepoints(B):
+    return torch.linalg.vector_norm(B, dim=-1).argmax(dim=1)
+
+
+def _tdr_select_max_norm_vectors(B):
+    max_timepoints = _tdr_max_norm_timepoints(B)
+    return torch.stack(
+        [B[var_idx, time_idx] for var_idx, time_idx in enumerate(max_timepoints)]
+    )
+
+
+def _tdr_selected_timepoint(details, axes):
+    selected_B = details["B_reduced"][list(axes)]
+    selected_norms = torch.linalg.vector_norm(selected_B, dim=-1).sum(dim=0)
+    return int(selected_norms.argmax().item())
+
+
+def _tdr_orthogonalize(B):
+    Q, _ = torch.linalg.qr(B.T, mode="reduced")
+    orthogonalized = Q.T
+    signs = torch.sign(torch.sum(orthogonalized * B, dim=1, keepdim=True))
+    signs[signs == 0] = 1
+    return orthogonalized * signs
+
+
+def tdr(
+    model_name,
+    epoch="delay",
+    delay_cond=2,
+    n_components=12,
+    movement_target_len=None,
+    return_details=False,
+):
+    """
+    Compute task-derived regression axes from hidden activity.
+
+    The design matrix uses rows for rotation, frequency, speed, direction, and bias.
+    Returned axes are orthogonalized vectors in the first `n_components` PCA dimensions.
+    """
+    trial_activity = _tdr_gather_h(model_name, delay_cond=delay_cond)
+    r, trial_metadata = _tdr_make_r(
+        trial_activity,
+        epoch=epoch,
+        movement_target_len=movement_target_len,
+    )
+    F = _tdr_make_F(trial_metadata)
+    B = _tdr_fit_coefficients(F, r)
+    B_transposed = B.permute(2, 1, 0).contiguous()
+    B_reduced, pca = _tdr_reduce_coefficients(
+        B_transposed, r, n_components=n_components
+    )
+    tdr_timepoints = _tdr_max_norm_timepoints(B_reduced)
+    B_max = _tdr_select_max_norm_vectors(B_reduced)
+    tdr_axes = _tdr_orthogonalize(B_max)
+
+    if return_details:
+        return {
+            "tdr_axes": tdr_axes,
+            "trial_activity": trial_activity,
+            "trial_metadata": trial_metadata,
+            "F": F,
+            "r": r,
+            "B": B,
+            "B_transposed": B_transposed,
+            "B_reduced": B_reduced,
+            "B_max": B_max,
+            "tdr_timepoints": tdr_timepoints,
+            "pca": pca,
+        }
+    return tdr_axes
+
+
+def _tdr_validate_variables(x_var, y_var):
+    if x_var not in range(len(TDR_VARIABLE_NAMES)):
+        raise ValueError("x_var must be an integer from 0 to 4")
+    if y_var not in range(len(TDR_VARIABLE_NAMES)):
+        raise ValueError("y_var must be an integer from 0 to 4")
+
+
+def _tdr_epoch_for_epoch_pcs(epoch):
+    return "delay" if epoch == "delay" else "movement"
+
+
+def _project_epoch_activity_onto_tdr(env_data, details, axis1, axis2):
+    pca = details["pca"]
+    tdr_axes = details["tdr_axes"][[axis1, axis2]].detach().cpu().numpy()
+    env_reduced = pca.transform(env_data.detach().cpu().numpy())
+    return env_reduced @ tdr_axes.T
+
+
+def plot_tdr_activity(
+    model_name,
+    epoch,
+    movement_type,
+    x_var=0,
+    y_var=1,
+    average=True,
+    add_new_rule_inputs=False,
+):
+    """Plot epoch activity using `epoch_pcs` with TDR axes instead of PC axes."""
+    epoch_pcs(
+        model_name,
+        epoch,
+        movement_type,
+        "h",
+        average=average,
+        add_new_rule_inputs=add_new_rule_inputs,
+        use_tdr=True,
+        axis1=x_var,
+        axis2=y_var,
+    )
+
+
+def get_epoch_act(
     model_name,
     epoch,
     movement_type,
     system,
-    speed_cond=5,
+    average=True,
+    speed_cond=None,
     delay_cond=1,
     batch_size=32,
     add_new_rule_inputs=False,
+    use_tdr=False,
+    tdr_timepoint=None,
 ):
     """
     Extracts trial-aligned activity vectors at a specified epoch across environments and fits a 2D PCA.
@@ -71,12 +339,16 @@ def get_mean_act(
         System to analyze: either "neural" (hidden state `h`) or "motor" (muscle activations).
     movement_type : str
         Movement type: "extension" (single movement) or "extension_retraction" (compound movement).
-    speed_cond : int, optional
-        Speed condition for the trials (default: 5).
+    speed_cond : int, sequence of int, or None, optional
+        Speed condition(s) for the trials. If None, uses all 10 speed conditions.
     delay_cond : int, optional
         Delay condition for the trials (default: 1).
     batch_size : int, optional
         Number of trials to simulate per environment (default: 256).
+    use_tdr : bool, optional
+        If True, extracts activity at the supplied TDR max-norm timepoint.
+    tdr_timepoint : int, optional
+        TDR timepoint within the TDR epoch to use when `use_tdr=True`.
 
     Returns
     -------
@@ -94,11 +366,20 @@ def get_mean_act(
     model_path = f"checkpoints/{model_name}"
     test = Test(model_path, model_name, add_new_rule_inputs=add_new_rule_inputs)
 
-    options = {
+    if use_tdr and tdr_timepoint is None:
+        raise ValueError("tdr_timepoint is required when use_tdr=True")
+
+    if speed_cond is None:
+        speed_conds = range(10)
+    elif np.isscalar(speed_cond):
+        speed_conds = [int(speed_cond)]
+    else:
+        speed_conds = [int(speed) for speed in speed_cond]
+
+    base_options = {
         "batch_size": batch_size,
         "reach_conds": np.arange(0, 32, int(32 / batch_size)),
         "deterministic": True,
-        "speed_cond": speed_cond,
         "delay_cond": delay_cond,
     }
 
@@ -112,57 +393,102 @@ def get_mean_act(
         raise ValueError
 
     for env in envs_to_use:
-        trial_data = test.trial(
-            options,
-            env_dict[env],
-        )
+        speed_hs = []
+        for speed in speed_conds:
+            options = base_options.copy()
+            options["speed_cond"] = speed
+            trial_data = test.trial(
+                options,
+                env_dict[env],
+            )
 
-        end_delay = trial_data["epoch_bounds"]["delay"][1] - 1
-        end_stable = trial_data["epoch_bounds"]["stable"][1] - 1
+            end_stable = trial_data["epoch_bounds"]["stable"][1] - 1
+            end_delay = trial_data["epoch_bounds"]["delay"][1] - 1
+            end_movement = trial_data["epoch_bounds"]["movement"][1] - 1
+            end_hold = trial_data["epoch_bounds"]["hold"][1] - 1
 
-        end_movement = trial_data["epoch_bounds"]["movement"][1] - 1
-        end_hold = trial_data["epoch_bounds"]["hold"][1] - 1
+            if use_tdr:
+                tdr_epoch = _tdr_epoch_for_epoch_pcs(epoch)
+                epoch_start, epoch_end = trial_data["epoch_bounds"][tdr_epoch]
+                timestep = min(epoch_start + int(tdr_timepoint), epoch_end - 1)
+                h = trial_data[system][:, timestep]
+            elif epoch == "stable":
+                h = trial_data[system][:, end_stable]
+            elif epoch == "delay":
+                h = trial_data[system][:, end_delay]
+            elif epoch == "hold":
+                h = trial_data[system][:, end_hold]
+            elif epoch == "extension" and movement_type == "extension_retraction":
+                middle_movement = get_middle_movement(trial_data)
+                h = trial_data[system][:, middle_movement]
+            elif epoch == "extension" and movement_type == "extension":
+                h = trial_data[system][:, end_movement]
+            elif epoch == "retraction":
+                assert movement_type == "extension_retraction"
+                h = trial_data[system][:, end_movement]
+            else:
+                raise ValueError
 
-        if epoch == "stable":
-            h = trial_data[system][:, end_stable]
-        elif epoch == "delay":
-            h = trial_data[system][:, end_delay]
-        elif epoch == "hold":
-            h = trial_data[system][:, end_hold]
-        elif epoch == "extension" and movement_type == "extension_retraction":
-            middle_movement = get_middle_movement(trial_data)
-            h = trial_data[system][:, middle_movement]
-        elif epoch == "extension" and movement_type == "extension":
-            h = trial_data[system][:, end_movement]
-        elif epoch == "retraction":
-            assert movement_type == "extension_retraction"
-            h = trial_data[system][:, end_movement]
+            speed_hs.append(h)
+
+        h = torch.cat(speed_hs, dim=0)
+        if average:
+            env_hs.append(h.mean(dim=0).unsqueeze(0))
         else:
-            raise ValueError
-
-        env_hs.append(h.mean(dim=0).unsqueeze(0))
+            env_hs.append(h)
 
     return env_hs, envs_to_use
 
 
 def epoch_pcs(
-    model_name, epoch, movement_type, system, add_new_rule_inputs=False, plot_3d=False
+    model_name,
+    epoch,
+    movement_type,
+    system,
+    average=True,
+    add_new_rule_inputs=False,
+    plot_3d=False,
+    use_tdr=True,
+    axis1=0,
+    axis2=1,
 ):
     exp_path = f"results/{model_name}/compositionality/pcs"
     create_dir(exp_path)
 
     assert system == "h" or system == "muscle_acts"
+    if use_tdr:
+        if system != "h":
+            raise ValueError("TDR projections are only defined for hidden activity")
+        if plot_3d:
+            raise ValueError("TDR projection plotting is 2D only")
+        _tdr_validate_variables(axis1, axis2)
 
-    env_hs, envs_to_use = get_mean_act(
+    if use_tdr:
+        tdr_details = tdr(
+            model_name,
+            epoch=_tdr_epoch_for_epoch_pcs(epoch),
+            delay_cond=2,
+            return_details=True,
+        )
+        tdr_timepoint = _tdr_selected_timepoint(tdr_details, (axis1, axis2))
+    else:
+        tdr_details = None
+        tdr_timepoint = None
+
+    env_hs, envs_to_use = get_epoch_act(
         model_name,
         epoch,
         movement_type,
         system,
+        average=average,
         add_new_rule_inputs=add_new_rule_inputs,
+        use_tdr=use_tdr,
+        tdr_timepoint=tdr_timepoint,
     )
 
-    epoch_pca = PCA(n_components=3)
-    epoch_pca.fit(torch.cat(env_hs, dim=0))
+    if not use_tdr:
+        epoch_pca = PCA(n_components=3)
+        epoch_pca.fit(torch.cat(env_hs, dim=0))
 
     colors = plt.cm.tab10(np.linspace(0, 1, len(env_dict)))
     env_color_dict = {}
@@ -185,29 +511,44 @@ def epoch_pcs(
         )
 
         # transform
-        h_proj = epoch_pca.transform(env_data)
+        if use_tdr:
+            h_proj = _project_epoch_activity_onto_tdr(
+                env_data, tdr_details, axis1, axis2
+            )
+        else:
+            h_proj = epoch_pca.transform(env_data)
 
         # Plot the 3D line
         if plot_3d:
             ax.scatter(
-                h_proj[-1, 0],
-                h_proj[-1, 1],
-                h_proj[-1, 2],
+                h_proj[:, 0],
+                h_proj[:, 1],
+                h_proj[:, 2],
                 color=env_color_dict[env],
                 s=250,
                 alpha=0.75,
             )
         else:
             ax.scatter(
-                h_proj[-1, 0],
-                h_proj[-1, 1],
+                h_proj[:, 0],
+                h_proj[:, 1],
                 color=env_color_dict[env],
                 s=250,
                 alpha=0.75,
             )
 
-    # Set labels for axes
-    save_fig(os.path.join(exp_path, system, f"{epoch}_{movement_type}_pcs"), eps=True)
+    if use_tdr:
+        ax.set_xlabel(TDR_VARIABLE_NAMES[axis1])
+        ax.set_ylabel(TDR_VARIABLE_NAMES[axis2])
+        save_path = os.path.join(
+            f"results/{model_name}/compositionality/tdr",
+            system,
+            f"{epoch}_{movement_type}_{TDR_VARIABLE_NAMES[axis1]}_{TDR_VARIABLE_NAMES[axis2]}",
+        )
+    else:
+        save_path = os.path.join(exp_path, system, f"{epoch}_{movement_type}_pcs")
+
+    save_fig(save_path, eps=True)
 
 
 ######################################################
@@ -579,7 +920,11 @@ def composite_input_optimization(
         x = torch.zeros(size=(test.batch_size, test.hid_size))
         h = torch.zeros(size=(test.batch_size, test.hid_size))
 
-        env_tmp = env(effector=effector, zero_feedback=test.zero_feedback)
+        env_tmp = env(
+            effector=effector,
+            zero_feedback=test.zero_feedback,
+            single_env=test.single_env,
+        )
         obs, info = env_tmp.reset(testing=True, options=options)
 
         terminated = False
@@ -710,8 +1055,16 @@ def test_sequential_inputs(
         noise_level_inp=noise_inp,
         device="cpu",
     )
-    extension_env = extension(effector=effector, zero_feedback=test.zero_feedback)
-    retraction_env = retraction(effector=effector, zero_feedback=test.zero_feedback)
+    extension_env = extension(
+        effector=effector,
+        zero_feedback=test.zero_feedback,
+        single_env=test.single_env,
+    )
+    retraction_env = retraction(
+        effector=effector,
+        zero_feedback=test.zero_feedback,
+        single_env=test.single_env,
+    )
     test.batch_size = options["batch_size"]
     policy = test.policy
 
