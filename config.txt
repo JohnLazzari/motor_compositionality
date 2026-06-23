@@ -1,2 +1,2 @@
 model_name=rnn256_softplus_kinematics
-experiment=run_all_neural_epoch_tdr
+experiment=train_rnn256_softplus_reachback

@@ -24,8 +24,8 @@ class Figure8(MotornetEnv):
             speed_cond,
             delay_cond,
             custom_delay,
-            train_movement_times=list(np.arange(100, 300, 5)),
-            test_movement_times=list(np.arange(100, 300, 10)),
+            train_movement_times=list(np.arange(100, 300, 40)),
+            test_movement_times=list(np.arange(100, 300, 20)),
             speed_denominator=300,
             set_half_movement=True,
         )
