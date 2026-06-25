@@ -214,7 +214,7 @@ def plot_task_kinematics(model_name):
 
             save_fig(
                 os.path.join(exp_path, "scatter", f"{env}_speed{speed}_kinematics"),
-                eps=True,
+                eps=False,
             )
 
 

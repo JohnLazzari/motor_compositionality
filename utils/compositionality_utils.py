@@ -548,7 +548,7 @@ def epoch_pcs(
     else:
         save_path = os.path.join(exp_path, system, f"{epoch}_{movement_type}_pcs")
 
-    save_fig(save_path, eps=True)
+    save_fig(save_path, eps=False)
 
 
 ######################################################

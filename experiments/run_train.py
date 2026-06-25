@@ -568,8 +568,8 @@ def train_rnn256_softplus():
     mult_train.train(model_path, model_file)
 
 
-def train_rnn256_softplus_resevoir():
-    mult_train = MultitaskTrainer(resevoir=True, hid_size=256, spectral_radius=1.3)
+def train_rnn256_softplus_reservoir():
+    mult_train = MultitaskTrainer(resevoir=True, spectral_radius=1.3)
     env_dict = {
         "Reach": Reach,
         "ClkCurvedReach": ClkCurvedReach,
@@ -577,15 +577,18 @@ def train_rnn256_softplus_resevoir():
         "Sinusoid": Sinusoid,
         "InvSinusoid": InvSinusoid,
     }
-    model_path = "checkpoints/rnn256_softplus_resevoir"
-    model_file = "rnn256_softplus_resevoir.pth"
-    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS RESEVOIR")
+    model_path = "checkpoints/rnn256_softplus_reservoir"
+    model_file = "rnn256_softplus_reservoir.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS RESERVOIR")
     mult_train.train(model_path, model_file, env_dict=env_dict)
 
 
-def train_rnn256_softplus_echo():
+def train_rnn256_softplus_reservoir_nofeedback():
     mult_train = MultitaskTrainer(
-        resevoir=True, hid_size=256, sparsity=0.99, spectral_radius=1.3
+        resevoir=True,
+        spectral_radius=1.3,
+        zero_feedback=True,
+        inp_size=14,
     )
     env_dict = {
         "Reach": Reach,
@@ -594,9 +597,9 @@ def train_rnn256_softplus_echo():
         "Sinusoid": Sinusoid,
         "InvSinusoid": InvSinusoid,
     }
-    model_path = "checkpoints/rnn256_softplus_echo"
-    model_file = "rnn256_softplus_echo.pth"
-    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS ECHO")
+    model_path = "checkpoints/rnn256_softplus_reservoir_nofeedback"
+    model_file = "rnn256_softplus_reservoir_nofeedback.pth"
+    print("TRAINING RNN WITH SOFTPLUS AND 256 UNITS RESERVOIR no feedback")
     mult_train.train(model_path, model_file, env_dict=env_dict)
 
 
@@ -738,10 +741,10 @@ if __name__ == "__main__":
 
     if args.experiment == "train_rnn256_softplus":
         train_rnn256_softplus()
-    elif args.experiment == "train_rnn256_softplus_resevoir":
-        train_rnn256_softplus_resevoir()
-    elif args.experiment == "train_rnn256_softplus_echo":
-        train_rnn256_softplus_echo()
+    elif args.experiment == "train_rnn256_softplus_reservoir":
+        train_rnn256_softplus_reservoir()
+    elif args.experiment == "train_rnn256_softplus_reservoir_nofeedback":
+        train_rnn256_softplus_reservoir_nofeedback()
     elif args.experiment == "train_rnn256_softplus_noreg":
         train_rnn256_softplus_noreg()
     elif args.experiment == "train_rnn256_softplus_nofeedback":

@@ -498,7 +498,7 @@ def plot_composite_input_loss(model_name):
     for e, env in enumerate(trial_data):
         loss = trial_data[env]["test_loss"]
         ax.plot(loss, linewidth=4, color=colors_envs[e], alpha=0.75)
-    save_fig(os.path.join(exp_path, "optimization_losses"), eps=True)
+    save_fig(os.path.join(exp_path, "optimization_losses"), eps=False)
 
 
 # Get the loss from every composite input on each environment and get the heat map
@@ -513,7 +513,7 @@ def plot_composite_input_heat_map(model_name):
         im = ax.imshow(rule_input, cmap="RdBu", vmin=2, vmax=-2)
         _ = fig.colorbar(im, ax=ax, fraction=0.07, pad=0.04)
         fig.tight_layout()
-        save_fig(os.path.join(exp_path, f"extension_heat_map_{env}"), eps=True)
+        save_fig(os.path.join(exp_path, f"extension_heat_map_{env}"), eps=False)
 
 
 # Get the loss from every composite input on each environment and get the heat map
@@ -532,7 +532,7 @@ def plot_composite_input_kinematics(model_name):
 
     for env in extension_dict:
         plot_env_kinematics(trial_data[env]["xy"])
-        save_fig(os.path.join(exp_path, f"extension_kinematics_{env}"), eps=True)
+        save_fig(os.path.join(exp_path, f"extension_kinematics_{env}"), eps=False)
 
 
 def plot_composite_input_init(model_name):
@@ -541,7 +541,8 @@ def plot_composite_input_init(model_name):
     trial_data = load_pickle(load_name)
     colors_envs = plt.cm.tab10(np.linspace(0, 1, len(env_dict)))
 
-    env_hs, _ = get_mean_act(
+    # TODO fix this
+    env_hs, _ = get_epoch_act(
         model_name, "delay", "extension", delay_cond=2, batch_size=32
     )
     env_hs = np.concatenate(env_hs)
@@ -596,7 +597,7 @@ def plot_composite_input_init(model_name):
             marker="X",
             color=colors_envs[e],
         )
-    save_fig(os.path.join(exp_path, "extension_init_all"), eps=True)
+    save_fig(os.path.join(exp_path, "extension_init_all"), eps=False)
 
 
 #################### Sequential input experiments ####################
