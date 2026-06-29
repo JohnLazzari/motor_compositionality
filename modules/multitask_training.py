@@ -3,9 +3,8 @@ import motornet as mn
 import numpy as np
 import random
 import os
-import pickle
 
-from modules.models import RNNPolicy, GRUPolicy, RNNMusclePolicy
+from modules.models import RNNPolicy, GRUPolicy
 from modules.envs.reach import Reach
 from modules.envs.clk_curved_reach import ClkCurvedReach
 from modules.envs.cclk_curved_reach import CClkCurvedReach
@@ -43,10 +42,23 @@ DEF_HP = {
     "simple_dynamics_weight": 1e-3,
     "zero_feedback": False,
     "single_env": False,
+    "data_driven": False,
 }
 
 
 class MultitaskTrainer:
+    """
+    Train recurrent policies on MotorNet reaching tasks.
+
+    Normal mode uses the existing hand-position loss: the policy receives
+    environment observations, drives the arm, and compares fingertip position
+    against the task target.
+
+    Data-driven mode still uses the same environment and arm rollout. The saved
+    dataset only chooses the condition and supplies target muscle activity;
+    observations still come from the environment, so feedback remains present.
+    """
+
     def __init__(
         self,
         network: str = DEF_HP["network"],
@@ -72,6 +84,7 @@ class MultitaskTrainer:
         simple_dynamics_weight: float = DEF_HP["simple_dynamics_weight"],
         zero_feedback: bool = DEF_HP["zero_feedback"],
         single_env: bool = DEF_HP["single_env"],
+        data_driven: bool = DEF_HP["data_driven"],
         save_model: bool = True,
     ):
         self.network = network
@@ -97,8 +110,9 @@ class MultitaskTrainer:
         self.simple_dynamics_weight = simple_dynamics_weight
         self.zero_feedback = zero_feedback
         self.single_env = single_env
+        self.data_driven = data_driven
+        self.data_path = None
         self.save_model = save_model
-        self.training_mode = "arm"
 
         self.full_env_dict = {
             "Reach": Reach,
@@ -123,12 +137,30 @@ class MultitaskTrainer:
         load_model_path=None,
         load_model_file=None,
         transfer=False,
+        data_path=None,
     ):
+        """
+        Train the policy in normal or data-driven mode.
+
+        In normal mode, `data_path` is ignored and the primary loss is the
+        fingertip-to-target loss. In data-driven mode, `data_path` points to a
+        `muscle_act_data.pkl` file. Each batch samples a saved task condition,
+        resets the environment to that condition, rolls out the arm using
+        environment observations, and uses MSE between generated and saved
+        muscle activity as the primary loss.
+        """
+
         # create model path for saving model and hp
         create_dir(model_path)
 
+        if self.data_driven:
+            if data_path is None:
+                data_path = os.path.join(model_path, "muscle_act_data.pkl")
+            self.data_path = data_path
+        else:
+            self.data_path = None
+
         # Save the training parameters from this training object
-        self.training_mode = "arm"
         save_pickle(f"{model_path}/mult_train.pkl", self)
         device = torch.device("cpu")
         effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
@@ -183,13 +215,19 @@ class MultitaskTrainer:
 
         if env_dict is None:
             env_dict = self.full_env_dict
-        env_list = [env for env in env_dict.keys()]
+
+        muscle_data = None
+        if self.data_driven:
+            muscle_data = load_pickle(self.data_path)
+            env_list = list(muscle_data["tasks"])
+        else:
+            env_list = [env for env in env_dict.keys()]
 
         # initialize loss lists
-        env_losses = self._empty_loss_dict(env_dict)
+        env_losses = self._empty_loss_dict(env_list)
         total_losses = []
 
-        env_test_losses = self._empty_loss_dict(env_dict)
+        env_test_losses = self._empty_loss_dict(env_list)
         total_test_losses = []
 
         interval = 100
@@ -198,10 +236,6 @@ class MultitaskTrainer:
         probs = [1 / len(env_list)] * len(env_list)
 
         for batch in range(self.epochs):
-            # initialize batch
-            x = torch.zeros(size=(self.batch_size, self.hid_size))
-            h = torch.zeros(size=(self.batch_size, self.hid_size))
-
             env_name = random.choices(env_list, probs)[0]
             env = env_dict[env_name](
                 effector=effector,
@@ -209,14 +243,44 @@ class MultitaskTrainer:
                 single_env=self.single_env,
             )
 
+            target_muscle_acts = None
+            if self.data_driven:
+                # Pick a saved task/speed/delay/direction condition for this batch.
+                condition = self._sample_data_condition(muscle_data, env_name)
+                batch_size = len(condition["direction_indices"])
+                reset_kwargs = {
+                    "testing": False,
+                    "options": {
+                        "batch_size": batch_size,
+                        "reach_conds": condition["env_reach_conds"],
+                        "speed_cond": int(condition["env_speed"]),
+                        "delay_cond": int(condition["delay_cond"]),
+                        "deterministic": True,
+                    },
+                }
+                target_muscle_acts = self._condition_muscle_acts(
+                    condition["condition_data"], condition["direction_indices"], device
+                )
+            else:
+                batch_size = self.batch_size
+                reset_kwargs = {"options": {"batch_size": batch_size}}
+
+            # initialize batch
+            x = torch.zeros(size=(batch_size, self.hid_size))
+            h = torch.zeros(size=(batch_size, self.hid_size))
+
             # Get first timestep
-            obs, info = env.reset(options={"batch_size": self.batch_size})
+            obs, info = env.reset(**reset_kwargs)
             terminated = False
 
             # initial positions and targets
             xy = [info["states"]["fingertip"][:, None, :]]
             tg = [info["goal"][:, None, :]]
-            muscle_acts = [info["states"]["muscle"][:, 0].unsqueeze(1)]
+            muscle_acts = (
+                []
+                if self.data_driven
+                else [info["states"]["muscle"][:, 0].unsqueeze(1)]
+            )
             hs = [h.unsqueeze(1)]
 
             timestep = 0
@@ -236,17 +300,21 @@ class MultitaskTrainer:
 
                 timestep += 1
 
-            # concatenate into a (batch_size, n_timesteps, xy) tensor
+            # concatenate into a (batch_size, n_timesteps, features) tensor
             xy = torch.cat(xy, dim=1)
             tg = torch.cat(tg, dim=1)
             muscle_acts = torch.cat(muscle_acts, dim=1)
             hs = torch.cat(hs, dim=1)
 
             # Implement loss function
-            loss = self.l1_dist(xy, tg)  # L1 loss on position
+            if self.data_driven:
+                # Compare generated arm muscle activity to saved muscle activity.
+                loss = self.l1_dist(muscle_acts, target_muscle_acts)
+            else:
+                loss = self.l1_dist(xy, tg)  # L1 loss on position
+                loss += self.l1_muscle_act(muscle_acts, self.l1_muscle_act_scale)
             loss += self.l1_rate(hs, self.l1_rate_scale)
             loss += self.l1_weight(policy, self.l1_weight_scale)
-            loss += self.l1_muscle_act(muscle_acts, self.l1_muscle_act_scale)
             if self.activation_name != "tanh":
                 loss += self.simple_dynamics(
                     hs, policy.mrnn, weight=self.simple_dynamics_weight
@@ -280,7 +348,9 @@ class MultitaskTrainer:
             # saving model
             if batch % self.save_iter == 0:
                 # Get test loss
-                test_loss_envs, test_loss = self.eval(policy, env_dict=env_dict)
+                test_loss_envs, test_loss = self.eval(
+                    policy, env_dict=env_dict, muscle_data=muscle_data
+                )
 
                 self._update_loss_dict(test_loss_envs, env_test_losses)
                 total_test_losses.append(test_loss)
@@ -296,347 +366,159 @@ class MultitaskTrainer:
                 # If current test loss is better than previous, save model and update best loss
                 if test_loss <= best_test_loss:
                     best_test_loss = test_loss
-                    torch.save(
-                        {
-                            "agent_state_dict": policy.state_dict(),
-                            "optimizer_state_dict": optimizer.state_dict(),
-                        },
-                        model_path + "/" + model_file,
-                    )
+                    checkpoint = {
+                        "agent_state_dict": policy.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                    }
+                    if self.data_driven:
+                        checkpoint["data_path"] = self.data_path
+                    torch.save(checkpoint, model_path + "/" + model_file)
                     print("Model Saved!")
                     print(f"Directory: {model_path}/{model_file}")
                     print("\n")
 
-    def train_kinematics(
-        self,
-        model_path,
-        model_file,
-        load_model=False,
-        load_optim=False,
-        load_model_path=None,
-        load_model_file=None,
-        data_path=None,
-        probs=None,
-    ):
-        """Train an RNN to predict muscle activity from saved supervised inputs."""
-        if self.network != "rnn":
-            raise ValueError("Kinematic training currently supports only RNNPolicy")
+    def eval(self, policy, env_dict=None, muscle_data=None):
+        """Evaluate using the same primary loss as train.
 
-        create_dir(model_path)
-        self.training_mode = "kinematics"
-        self.zero_feedback = True
-        save_pickle(f"{model_path}/mult_train.pkl", self)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Training kinematics on device: {device}")
-
-        if data_path is None:
-            data_path = os.path.join(model_path, "muscle_act_data.pkl")
-        muscle_data = load_pickle(data_path)
-
-        env_list = list(muscle_data["tasks"])
-
-        if probs is None:
-            probs = [1 / len(env_list)] * len(env_list)
-
-        train_direction_indices = self._even_condition_indices(
-            len(muscle_data["reach_conds"]), 16
-        )
-        train_speed_conds = [
-            int(muscle_data["speed_conds"][i])
-            for i in self._even_condition_indices(len(muscle_data["speed_conds"]), 5)
-        ]
-
-        sample_env = env_list[0]
-        sample_speed = train_speed_conds[0]
-        train_delay_conds = self._kinematic_delay_conds(
-            muscle_data, sample_env, sample_speed
-        )
-        sample_delay_cond = train_delay_conds[0]
-        sample_condition_data = self._kinematic_condition_data(
-            muscle_data, sample_env, sample_speed, sample_delay_cond
-        )
-        sample_obs = sample_condition_data["obs"]
-        sample_target = sample_condition_data["action"]
-        if sample_obs.shape[-1] != self.inp_size:
-            raise ValueError(
-                f"inp_size={self.inp_size} does not match supervised obs size {sample_obs.shape[-1]}"
-            )
-
-        policy = RNNMusclePolicy(
-            inp_size=self.inp_size,
-            hid_size=self.hid_size,
-            output_dim=sample_target.shape[-1],
-            activation_name=self.activation_name,
-            noise_level_act=self.noise_level_act,
-            noise_level_inp=self.noise_level_inp,
-            rec_constrained=self.rec_constrained,
-            inp_constrained=self.inp_constrained,
-            resevoir=self.resevoir,
-            sparsity=self.sparsity,
-            spectral_radius=self.spectral_radius,
-            dt=self.dt,
-            t_const=self.t_const,
-            device=device,
-            output_activation="sigmoid",
-        )
-        optimizer = torch.optim.Adam(policy.parameters(), lr=self.lr)
-
-        if load_model_path is None:
-            load_model_path = model_path
-        if load_model_file is None:
-            load_model_file = model_file
-        if load_model:
-            checkpoint = load_torch_checkpoint(
-                os.path.join(load_model_path, load_model_file),
-                map_location=device,
-            )
-            policy.load_state_dict(checkpoint["agent_state_dict"])
-            if load_optim:
-                optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-
-        env_losses = self._empty_loss_dict(env_list)
-        total_losses = []
-        env_test_losses = self._empty_loss_dict(env_list)
-        total_test_losses = []
-        interval = 100
-        best_test_loss = np.inf
-
-        for batch in range(self.epochs):
-            env_name = random.choices(env_list, probs)[0]
-            speed = random.choice(train_speed_conds)
-            delay_cond = random.choice(train_delay_conds)
-            condition_data = self._kinematic_condition_data(
-                muscle_data, env_name, speed, delay_cond
-            )
-            predictions, targets, hs = self._run_kinematic_trial(
-                policy,
-                condition_data,
-                train_direction_indices,
-                device,
-                noise=True,
-            )
-
-            mse_loss = torch.nn.functional.mse_loss(predictions, targets)
-            loss = mse_loss
-            loss += self.l1_rate(hs, self.l1_rate_scale)
-            loss += self.l1_weight(policy, self.l1_weight_scale)
-            if self.activation_name != "tanh":
-                loss += self.simple_dynamics(
-                    hs, policy.mrnn, weight=self.simple_dynamics_weight
-                )
-
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=1.0)
-            optimizer.step()
-
-            env_losses[env_name].append(loss.item())
-            total_losses.append(loss.item())
-
-            if (batch % interval == 0) and (batch != 0):
-                print(
-                    "Batch {}/{} Done, mean policy loss: {}".format(
-                        batch, self.epochs, sum(total_losses[-interval:]) / interval
-                    )
-                )
-                save_pickle(os.path.join(model_path, "env_losses.pkl"), env_losses)
-                np.savetxt(os.path.join(model_path, "total_losses.txt"), total_losses)
-
-            if batch % self.save_iter == 0:
-                test_loss_envs, test_loss = self.eval_kinematics(
-                    policy, muscle_data, env_list=env_list
-                )
-                self._update_loss_dict(test_loss_envs, env_test_losses)
-                total_test_losses.append(test_loss)
-                save_pickle(
-                    os.path.join(model_path, "val_env_losses.pkl"), env_test_losses
-                )
-                np.savetxt(
-                    os.path.join(model_path, "val_total_losses.txt"), total_test_losses
-                )
-
-                if test_loss <= best_test_loss:
-                    best_test_loss = test_loss
-                    torch.save(
-                        {
-                            "agent_state_dict": policy.state_dict(),
-                            "optimizer_state_dict": optimizer.state_dict(),
-                            "training_mode": "kinematics",
-                            "data_path": data_path,
-                            "train_direction_indices": train_direction_indices.tolist(),
-                            "train_speed_conds": list(train_speed_conds),
-                            "train_delay_conds": list(train_delay_conds),
-                        },
-                        os.path.join(model_path, model_file),
-                    )
-                    print("Model Saved!")
-                    print(f"Directory: {model_path}/{model_file}")
-                    print("\n")
-
-    def eval_kinematics(self, policy, muscle_data, env_list=None):
-        """Evaluate supervised muscle prediction on every saved condition."""
-        if env_list is None:
-            env_list = list(muscle_data["tasks"])
-
-        device = next(policy.parameters()).device
-        direction_indices = np.arange(len(muscle_data["reach_conds"]))
-        speed_conds = [int(speed) for speed in muscle_data["speed_conds"]]
-        total_test_loss = 0
-        condition_losses = self._empty_loss_dict(env_list)
-
-        for env_name in env_list:
-            condition_loss = 0
-            condition_count = 0
-            for speed in speed_conds:
-                delay_conds = self._kinematic_delay_conds(muscle_data, env_name, speed)
-                for delay_cond in delay_conds:
-                    condition_data = self._kinematic_condition_data(
-                        muscle_data, env_name, speed, delay_cond
-                    )
-                    with torch.no_grad():
-                        predictions, targets, _ = self._run_kinematic_trial(
-                            policy,
-                            condition_data,
-                            direction_indices,
-                            device,
-                            noise=False,
-                        )
-                    condition_loss += torch.nn.functional.mse_loss(
-                        predictions, targets
-                    ).item()
-                    condition_count += 1
-            condition_loss /= condition_count
-            condition_losses[env_name].append(condition_loss)
-            total_test_loss += condition_loss
-        total_test_loss /= len(env_list)
-
-        print("\n")
-        print("Kinematic Eval Results:")
-        for env_name in env_list:
-            print(
-                f"Total Loss for Environment {env_name}| "
-                f"{condition_losses[env_name][0]}"
-            )
-        print(f"Total Testing Loss: {total_test_loss}")
-        print("\n")
-        print("Validation losses saved!")
-
-        return condition_losses, total_test_loss
-
-    def _run_kinematic_trial(
-        self,
-        policy,
-        condition_data,
-        direction_indices,
-        device,
-        noise,
-    ):
-        """Run a sequence RNN over saved inputs and return muscle predictions/targets."""
-        observations = condition_data["obs"][direction_indices]
-        targets = condition_data["action"][direction_indices]
-        observations = torch.as_tensor(observations, dtype=torch.float32, device=device)
-        targets = torch.as_tensor(targets, dtype=torch.float32, device=device)
-        batch_size = observations.shape[0]
-        x = torch.zeros(size=(batch_size, self.hid_size), device=device)
-        h = torch.zeros(size=(batch_size, self.hid_size), device=device)
-        _, hs, predictions = policy(observations, x, h, noise=noise)
-        return predictions, targets, hs
-
-    @staticmethod
-    def _even_condition_indices(num_conditions, num_samples):
-        return np.linspace(0, num_conditions - 1, num_samples, dtype=int)
-
-    def _kinematic_delay_conds(self, muscle_data, env_name, speed):
-        speed_data = muscle_data["tasks"][env_name][int(speed)]
-        if "obs" in speed_data:
-            return [None]
-        if "delay_conds" in muscle_data:
-            return [int(delay_cond) for delay_cond in muscle_data["delay_conds"]]
-        return [int(delay_cond) for delay_cond in sorted(speed_data)]
-
-    def _kinematic_condition_data(self, muscle_data, env_name, speed, delay_cond):
-        speed_data = muscle_data["tasks"][env_name][int(speed)]
-        if "obs" in speed_data:
-            return speed_data
-        if delay_cond is None:
-            raise ValueError("delay_cond is required for nested muscle data")
-        return speed_data[int(delay_cond)]
-
-    def eval(self, policy, env_dict=None):
+        Normal mode evaluates hand-position loss over every task and speed.
+        Data-driven mode evaluates muscle-activity MSE over every saved task,
+        speed, delay, and reach direction in the loaded dataset.
+        """
         if env_dict is None:
             env_dict = self.full_env_dict
 
         effector = mn.effector.RigidTendonArm26(mn.muscle.MujocoHillMuscle())
 
-        # Currently 10 speed conds during testing, 3 for training
-        speed_conds = list(np.arange(0, 10))
+        eval_envs = [env for env in env_dict.keys()]
 
         total_test_loss = 0
-        condition_losses = self._empty_loss_dict(env_dict)
+        condition_losses = self._empty_loss_dict(eval_envs)
 
-        for env in env_dict:
+        for env_name in eval_envs:
             condition_loss = 0
+            condition_count = 0
+            speed_conds = list(np.arange(0, 10))
             for speed in speed_conds:
-                # initialize batch
-                # use 32 to get every possible direction
-                x = torch.zeros(size=(32, self.hid_size))
-                h = torch.zeros(size=(32, self.hid_size))
+                if self.data_driven:
+                    delay_cond = int(random.choice(muscle_data["delay_conds"]))
+                    condition_data = muscle_data["tasks"][env_name][speed][delay_cond]
+                    direction_indices = np.arange(
+                        condition_data["muscle_acts"].shape[0]
+                    )
+                    reach_conds = np.asarray(muscle_data["reach_conds"])[
+                        direction_indices
+                    ]
+                    batch_size = len(direction_indices)
+                    reset_kwargs = {
+                        "testing": True,
+                        "options": {
+                            "batch_size": batch_size,
+                            "reach_conds": reach_conds,
+                            "speed_cond": int(speed),
+                            "delay_cond": int(delay_cond),
+                            "deterministic": True,
+                        },
+                    }
+                    target_muscle_acts = self._condition_muscle_acts(
+                        condition_data, direction_indices, torch.device("cpu")
+                    )
+                else:
+                    batch_size = 32
+                    reset_kwargs = {
+                        "testing": True,
+                        "options": {
+                            "batch_size": batch_size,
+                            "reach_conds": np.arange(0, 32),
+                            "speed_cond": speed,
+                        },
+                    }
+                    target_muscle_acts = None
 
-                cur_env = env_dict[env](
+                x = torch.zeros(size=(batch_size, self.hid_size))
+                h = torch.zeros(size=(batch_size, self.hid_size))
+                cur_env = env_dict[env_name](
                     effector=effector,
                     zero_feedback=self.zero_feedback,
                     single_env=self.single_env,
                 )
 
-                # Get first timestep
-                obs, info = cur_env.reset(
-                    testing=True,
-                    options={
-                        "batch_size": 32,
-                        "reach_conds": np.arange(0, 32),
-                        "speed_cond": speed,
-                    },
-                )
+                obs, info = cur_env.reset(**reset_kwargs)
                 terminated = False
-
-                # initial positions and targets
                 xy = [info["states"]["fingertip"][:, None, :]]
                 tg = [info["goal"][:, None, :]]
-
+                muscle_acts = []
                 timestep = 0
-                # simulate whole episode
-                while not terminated:  # will run until `max_ep_duration` is reached
+
+                while not terminated:
                     with torch.no_grad():
-                        x, h, action = policy(obs, x, h)
+                        if self.network == "rnn":
+                            x, h, action = policy(obs, x, h, noise=False)
+                        else:
+                            x, h, action = policy(obs, x, h)
                         obs, _, terminated, info = cur_env.step(timestep, action=action)
-
-                    xy.append(info["states"]["fingertip"][:, None, :])  # trajectories
-                    tg.append(info["goal"][:, None, :])  # targets
-
+                    xy.append(info["states"]["fingertip"][:, None, :])
+                    tg.append(info["goal"][:, None, :])
+                    muscle_acts.append(info["states"]["muscle"][:, 0].unsqueeze(1))
                     timestep += 1
 
-                # concatenate into a (batch_size, n_timesteps, xy) tensor
                 xy = torch.cat(xy, dim=1)
                 tg = torch.cat(tg, dim=1)
+                if self.data_driven:
+                    muscle_acts = torch.cat(muscle_acts, dim=1)
+                    loss = self.l1_dist(muscle_acts, target_muscle_acts)
+                else:
+                    loss = self.l1_dist(xy, tg)
 
-                # Implement loss function
-                loss = self.l1_dist(xy, tg)  # L1 loss on position
                 condition_loss += loss.item()
-            condition_loss /= len(speed_conds)
-            condition_losses[env].append(condition_loss)
+                condition_count += 1
+
+            condition_loss /= condition_count
+            condition_losses[env_name].append(condition_loss)
             total_test_loss += condition_loss
-        total_test_loss /= len(env_dict)
+        total_test_loss /= len(eval_envs)
 
         print("\n")
-        print("Eval Results:")
         for env in condition_losses:
             print(f"Total Loss for Environment {env}| {condition_losses[env][0]}")
         print(f"Total Testing Loss: {total_test_loss}")
         print("\n")
-
         print("Validation losses saved!")
 
         return condition_losses, total_test_loss
+
+    def _sample_data_condition(self, muscle_data, env_name):
+        """Choose one saved condition and a batch of reach directions."""
+        speed_conditions = [int(speed) for speed in muscle_data["speed_conds"][::2]]
+        direction_indices_all = np.arange(len(muscle_data["reach_conds"]))[::2]
+
+        speed = random.choice(speed_conditions)
+        delay_cond = int(random.choice(muscle_data["delay_conds"]))
+        condition_data = muscle_data["tasks"][env_name][speed][delay_cond]
+        replace = self.batch_size > len(direction_indices_all)
+        direction_indices = np.random.choice(
+            direction_indices_all, size=self.batch_size, replace=replace
+        )
+        reach_conds = np.asarray(muscle_data["reach_conds"])[direction_indices]
+        env_reach_conds = reach_conds // 2
+        env_speed = speed // 2
+
+        return {
+            "direction_indices": direction_indices,
+            "delay_cond": delay_cond,
+            "condition_data": condition_data,
+            "env_speed": env_speed,
+            "env_reach_conds": env_reach_conds,
+        }
+
+    @staticmethod
+    def _condition_muscle_acts(condition_data, direction_indices, device):
+        """Return saved target muscle activity for selected directions."""
+        target_indices = torch.as_tensor(
+            direction_indices, dtype=torch.long, device=device
+        )
+        return torch.as_tensor(
+            condition_data["muscle_acts"], dtype=torch.float32, device=device
+        )[target_indices]
 
     @staticmethod
     def l1_dist(x, y):

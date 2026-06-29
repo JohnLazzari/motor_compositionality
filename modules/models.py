@@ -113,13 +113,6 @@ class RNNPolicy(nn.Module):
         return x, h, u
 
 
-class RNNMusclePolicy(RNNPolicy):
-    def forward(self, obs, x, h, *args, noise=True):
-        x, h = self.mrnn(obs, x, h, *args, noise=noise)
-        u = self.output_activation(self.fc(h))
-        return x, h, u
-
-
 class GRUPolicy(nn.Module):
     def __init__(self, inp_size, hid_size, output_dim, batch_first=True, device="cpu"):
         super().__init__()

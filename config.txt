@@ -1,2 +1,2 @@
-model_name=rnn256_softplus_resevoir
-experiment=plot_composite_input_kinematics
+model_name=individual_rnns_nofeedback
+experiment=train_rnn256_softplus_muscle_act_feedback

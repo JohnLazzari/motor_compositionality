@@ -27,7 +27,6 @@ class Test:
         device="cpu",
         add_new_rule_inputs=False,
         num_new_inputs=10,
-        single_env=None,
     ):
         """
         Trial object, stores functions to run a single trial and get data
@@ -68,15 +67,8 @@ class Test:
         self.l1_weight_scale = mult_train.l1_weight_scale
         self.l1_muscle_act_scale = mult_train.l1_muscle_act_scale
         self.simple_dynamics_weight = mult_train.simple_dynamics_weight
-        self.zero_feedback = getattr(mult_train, "zero_feedback", False)
-        if self.zero_feedback is None:
-            self.zero_feedback = False
-        if single_env is None:
-            self.single_env = getattr(mult_train, "single_env", False)
-        else:
-            self.single_env = single_env
-        if self.single_env is None:
-            self.single_env = False
+        self.zero_feedback = mult_train.zero_feedback
+        self.single_env = mult_train.single_env
         self.device = device
         self.add_new_rule_inputs = add_new_rule_inputs
         self.num_new_inputs = num_new_inputs
@@ -119,7 +111,6 @@ class Test:
         self,
         options,
         env,
-        stim=None,
         noise=False,
         rule_input=None,
     ):
@@ -194,11 +185,7 @@ class Test:
 
             with torch.no_grad():
                 # Check if silencing units
-                if stim is not None:
-                    x, h, action = self.policy(obs, x, h, stim, noise=noise)
-                else:
-                    x, h, action = self.policy(obs, x, h, noise=noise)
-
+                x, h, action = self.policy(obs, x, h, noise=noise)
                 # Take step in motornet environment
                 obs, _, terminated, info = env.step(timesteps, action=action)
 

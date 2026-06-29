@@ -715,13 +715,22 @@ def train_gru256():
     mult_train.train(model_path, model_file)
 
 
-def train_rnn256_softplus_kinematics():
-    mult_train = MultitaskTrainer(inp_size=14, hid_size=256)
-    model_path = "checkpoints/rnn256_softplus_kinematics"
-    model_file = "rnn256_softplus_kinematics.pth"
+def train_rnn256_softplus_muscle_act_feedback():
+    mult_train = MultitaskTrainer(data_driven=True)
+    model_path = "checkpoints/rnn256_softplus_muscle_act_feedback"
+    model_file = "rnn256_softplus_muscle_act_feedback.pth"
     data_path = "checkpoints/individual_rnns/muscle_act_data.pkl"
-    print("TRAINING RNN ON SUPERVISED MUSCLE ACTIVITY")
-    mult_train.train_kinematics(model_path, model_file, data_path=data_path)
+    print("TRAINING RNN THROUGH ARM ON SAVED MUSCLE ACTIVITY FEEDBACK")
+    mult_train.train(model_path, model_file, data_path=data_path)
+
+
+def train_rnn256_softplus_muscle_act_nofeedback():
+    mult_train = MultitaskTrainer(data_driven=True, zero_feedback=True, inp_size=14)
+    model_path = "checkpoints/rnn256_softplus_muscle_act_nofeedback"
+    model_file = "rnn256_softplus_muscle_act_nofeedback.pth"
+    data_path = "checkpoints/individual_rnns_nofeedback/muscle_act_data.pkl"
+    print("TRAINING RNN THROUGH ARM ON SAVED MUSCLE ACTIVITY NO FEEDBACK")
+    mult_train.train(model_path, model_file, data_path=data_path)
 
 
 def continue_training(model_name):
@@ -773,8 +782,10 @@ if __name__ == "__main__":
         train_gru512()
     elif args.experiment == "train_gru128":
         train_gru128()
-    elif args.experiment == "train_rnn256_softplus_kinematics":
-        train_rnn256_softplus_kinematics()
+    elif args.experiment == "train_rnn256_softplus_muscle_act_feedback":
+        train_rnn256_softplus_muscle_act_feedback()
+    elif args.experiment == "train_rnn256_softplus_muscle_act_nofeedback":
+        train_rnn256_softplus_muscle_act_nofeedback()
     elif args.experiment == "continue_training":
         continue_training(args.model_name)
 
