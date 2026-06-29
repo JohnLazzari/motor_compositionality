@@ -1,2 +1,0 @@
-model_name=individual_rnns_nofeedback
-experiment=train_rnn256_softplus_muscle_act_feedback
