@@ -45,6 +45,19 @@ INDIVIDUAL_MODEL_ENV_NO_FEEDBACK = {
     "InvFigure8": "rnn256_softplus_invfigure8_nofeedback",
 }
 
+MULTITASK_MODEL_ENV = {
+    "Reach": "rnn256_softplus_latest",
+    "ClkCurvedReach": "rnn256_softplus_latest",
+    "CClkCurvedReach": "rnn256_softplus_latest",
+    "Sinusoid": "rnn256_softplus_latest",
+    "InvSinusoid": "rnn256_softplus_latest",
+    "ReachBack": "rnn256_softplus_latest",
+    "ClkCycle": "rnn256_softplus_latest",
+    "CClkCycle": "rnn256_softplus_latest",
+    "Figure8": "rnn256_softplus_latest",
+    "InvFigure8": "rnn256_softplus_latest",
+}
+
 
 def collect_muscle_data(model_dict, save_name):
     """Collect muscle data from one task-specific RNN per matching environment."""
@@ -99,6 +112,10 @@ def collect_muscle_data_nofeedback():
     collect_muscle_data(INDIVIDUAL_MODEL_ENV_NO_FEEDBACK, "individual_rnns_nofeedback")
 
 
+def collect_muscle_data_feedback_multitask():
+    collect_muscle_data(MULTITASK_MODEL_ENV, "rnn256_softplus_latest")
+
+
 def _to_numpy(data):
     if hasattr(data, "detach"):
         return data.detach().cpu().numpy()
@@ -115,6 +132,31 @@ def iter_muscle_conditions(muscle_data):
                     yield env_name, int(speed), int(delay_cond), delay_data
 
 
+def _plot_muscle_activity(muscle_acts, title, save_path):
+    fig, muscle_ax = plt.subplots(1, 1, figsize=(8, 4), sharex=True)
+    colors = plt.cm.tab10(np.linspace(0, 1, muscle_acts.shape[-1]))
+    for muscle_idx, color in enumerate(colors):
+        muscle_ax.plot(
+            muscle_acts[:, :, muscle_idx].T,
+            color=color,
+            linewidth=0.6,
+            alpha=0.12,
+        )
+        muscle_ax.plot(
+            muscle_acts[:, :, muscle_idx].mean(axis=0),
+            color=color,
+            linewidth=2,
+            label=f"muscle {muscle_idx}",
+        )
+    muscle_ax.set_ylabel("muscle", rotation=0, labelpad=25, va="center")
+    muscle_ax.set_xlabel("timestep")
+    muscle_ax.spines["top"].set_visible(False)
+    muscle_ax.spines["right"].set_visible(False)
+    muscle_ax.legend(frameon=False, ncol=3, fontsize=8)
+    fig.suptitle(title)
+    save_fig(save_path)
+
+
 def plot_muscle_data(model_name):
     """Plot saved muscle activity for each task and speed."""
     model_path = f"checkpoints/{model_name}"
@@ -126,34 +168,37 @@ def plot_muscle_data(model_name):
     ):
         muscle_acts = _to_numpy(data["muscle_acts"])
 
-        fig, muscle_ax = plt.subplots(1, 1, figsize=(8, 4), sharex=True)
-        colors = plt.cm.tab10(np.linspace(0, 1, muscle_acts.shape[-1]))
-        for muscle_idx, color in enumerate(colors):
-            muscle_ax.plot(
-                muscle_acts[:, :, muscle_idx].T,
-                color=color,
-                linewidth=0.6,
-                alpha=0.12,
-            )
-            muscle_ax.plot(
-                muscle_acts[:, :, muscle_idx].mean(axis=0),
-                color=color,
-                linewidth=2,
-                label=f"muscle {muscle_idx}",
-            )
-        muscle_ax.set_ylabel("muscle", rotation=0, labelpad=25, va="center")
-        muscle_ax.set_xlabel("timestep")
-        muscle_ax.spines["top"].set_visible(False)
-        muscle_ax.spines["right"].set_visible(False)
-        muscle_ax.legend(frameon=False, ncol=3, fontsize=8)
-
         suffix = f"{env_name}_speed{speed}"
         title = f"{env_name} speed {speed}"
         if delay_cond is not None:
             suffix = f"{suffix}_delay{delay_cond}"
             title = f"{title} delay {delay_cond}"
-        fig.suptitle(title)
-        save_fig(os.path.join(save_path, suffix))
+        _plot_muscle_activity(muscle_acts, title, os.path.join(save_path, suffix))
+
+
+def plot_model_muscle_activity(model_name, direction_step=4, delay_cond=1):
+    """Run a model on each task/speed and plot generated muscle activity."""
+    model_path = f"checkpoints/{model_name}"
+    save_path = os.path.join("results", model_name, "muscle_activity")
+    test = Test(model_path, model_name)
+
+    reach_conds = np.arange(0, 32, direction_step)
+    for env_name, env in tqdm.tqdm(
+        env_dict.items(), desc="Plotting model muscle activity"
+    ):
+        for speed in range(10):
+            options = {
+                "batch_size": len(reach_conds),
+                "reach_conds": reach_conds,
+                "speed_cond": speed,
+                "delay_cond": delay_cond,
+                "deterministic": True,
+            }
+            trial_data = test.trial(options, env)
+            muscle_acts = _to_numpy(trial_data["muscle_acts"])
+            title = f"{env_name} speed {speed} delay {delay_cond}"
+            suffix = f"{env_name}_speed{speed}_delay{delay_cond}"
+            _plot_muscle_activity(muscle_acts, title, os.path.join(save_path, suffix))
 
 
 if __name__ == "__main__":
@@ -164,7 +209,11 @@ if __name__ == "__main__":
         collect_muscle_data_feedback()
     elif args.experiment == "collect_muscle_data_nofeedback":
         collect_muscle_data_nofeedback()
+    elif args.experiment == "collect_muscle_data_feedback_multitask":
+        collect_muscle_data_feedback_multitask()
     elif args.experiment == "plot_muscle_data":
         plot_muscle_data(args.model_name)
+    elif args.experiment == "plot_model_muscle_activity":
+        plot_model_muscle_activity(args.model_name)
     else:
         raise ValueError("Experiment not in this file")

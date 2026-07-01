@@ -13,8 +13,10 @@ from utils.compositionality_utils import (
     get_epoch_act,
     dsa_similarity_matrix,
     epoch_pcs,
+    delay_movement_pcs,
     composite_input_optimization,
     sequential_input_kinematics,
+    delay_movement_pcs,
 )
 from utils.plot_utils import (
     save_fig,
@@ -227,6 +229,34 @@ def run_all_neural_epoch_pcs_noaverage_3d(model_name):
     hold_pcs_neural_extension_retraction(
         model_name, average=False, plot_3d=True, use_tdr=False
     )
+
+
+def delay_movement_pcs_neural_extension(model_name, average=True):
+    delay_movement_pcs(
+        model_name,
+        "extension",
+        "h",
+        average=average,
+    )
+
+
+def delay_movement_pcs_neural_extension_retraction(model_name, average=True):
+    delay_movement_pcs(
+        model_name,
+        "extension_retraction",
+        "h",
+        average=average,
+    )
+
+
+def run_all_neural_delay_movement_pcs(model_name):
+    delay_movement_pcs_neural_extension(model_name)
+    delay_movement_pcs_neural_extension_retraction(model_name)
+
+
+def run_all_neural_delay_movement_pcs_noaverage(model_name):
+    delay_movement_pcs_neural_extension(model_name, average=False)
+    delay_movement_pcs_neural_extension_retraction(model_name, average=False)
 
 
 def run_all_neural_epoch_pcs_transfer(model_name):
@@ -469,7 +499,7 @@ def run_composite_input_optimization(model_name):
     options = {
         "batch_size": 8,
         "reach_conds": np.arange(0, 32, 4),
-        "speed_cond": 9,
+        "speed_cond": 1,
         "deterministic": True,
         "custom_delay": 150,
     }
@@ -623,6 +653,10 @@ if __name__ == "__main__":
         run_all_neural_epoch_pcs_noaverage(args.model_name)
     elif args.experiment == "run_all_neural_epoch_pcs_noaverage_3d":
         run_all_neural_epoch_pcs_noaverage_3d(args.model_name)
+    elif args.experiment == "run_all_neural_delay_movement_pcs":
+        run_all_neural_delay_movement_pcs(args.model_name)
+    elif args.experiment == "run_all_neural_delay_movement_pcs_noaverage":
+        run_all_neural_delay_movement_pcs_noaverage(args.model_name)
     elif args.experiment == "run_all_muscle_epoch_pcs":
         run_all_muscle_epoch_pcs(args.model_name)
 

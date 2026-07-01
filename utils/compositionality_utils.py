@@ -112,6 +112,8 @@ def _tdr_epoch_activity(trial_data, epoch):
         raise ValueError("epoch must be 'delay' or 'movement'")
 
     start, end = trial_data["epoch_bounds"][epoch]
+    if epoch == "movement":
+        start += 20
     return trial_data["h"][:, start:end]
 
 
@@ -402,6 +404,7 @@ def get_epoch_act(
                 env_dict[env],
             )
 
+            # Do not include to first 10-20 timesteps of movement epoch
             end_stable = trial_data["epoch_bounds"]["stable"][1] - 1
             end_delay = trial_data["epoch_bounds"]["delay"][1] - 1
             end_movement = trial_data["epoch_bounds"]["movement"][1] - 1
@@ -438,6 +441,216 @@ def get_epoch_act(
             env_hs.append(h)
 
     return env_hs, envs_to_use
+
+
+def get_delay_movement_timeseries(
+    model_name,
+    movement_type,
+    system,
+    average=True,
+    speed_cond=None,
+    delay_cond=1,
+    batch_size=32,
+    add_new_rule_inputs=False,
+):
+    """
+    Extract pre-movement and early movement activity as a continuous timeseries.
+
+    Parameters
+    ----------
+    model_name : str
+        Name of the trained model (used to locate checkpoints and hyperparameters).
+    movement_type : str
+        Movement type: "extension" (single movement) or "extension_retraction" (compound movement).
+    system : str
+        System to analyze: either "h" (hidden state) or "muscle_acts" (muscle activations).
+    average : bool, optional
+        If True, average across trials and speed conditions for each environment.
+    speed_cond : int, sequence of int, or None, optional
+        Speed condition(s) for the trials. If None, uses all 10 speed conditions.
+    delay_cond : int, optional
+        Delay condition for the trials (default: 1).
+    batch_size : int, optional
+        Number of trials to simulate per environment (default: 32).
+    add_new_rule_inputs : bool, optional
+        Passed through to ``Test``.
+
+    Returns
+    -------
+    env_timeseries : list of Tensor
+        Activity starts one timestep before movement onset and ends at the
+        first quarter of movement. This segment is interpolated across speed
+        conditions. If ``average=True``, each tensor has shape ``[time, size]``.
+        If ``average=False``, each tensor has shape
+        ``[n_trials * n_speeds, time, size]``.
+    envs_to_use : list
+        Environment names corresponding to ``env_timeseries``.
+
+    Raises
+    ------
+    ValueError
+        If an unknown ``system`` or ``movement_type`` is provided.
+    """
+
+    if system not in ("h", "muscle_acts"):
+        raise ValueError("system must be 'h' or 'muscle_acts'")
+
+    model_path = f"checkpoints/{model_name}"
+    test = Test(model_path, model_name, add_new_rule_inputs=add_new_rule_inputs)
+
+    if speed_cond is None:
+        speed_conds = range(10)
+    elif np.isscalar(speed_cond):
+        speed_conds = [int(speed_cond)]
+    else:
+        speed_conds = [int(speed) for speed in speed_cond]
+
+    base_options = {
+        "batch_size": batch_size,
+        "reach_conds": np.arange(0, 32, int(32 / batch_size)),
+        "deterministic": True,
+        "delay_cond": delay_cond,
+    }
+
+    env_timeseries = []
+
+    if movement_type == "extension":
+        envs_to_use = extension_dict.copy()
+    elif movement_type == "extension_retraction":
+        envs_to_use = retraction_dict.copy()
+    else:
+        raise ValueError("movement_type must be 'extension' or 'extension_retraction'")
+
+    for env in envs_to_use:
+        speed_timeseries = []
+        for speed in speed_conds:
+            options = base_options.copy()
+            options["speed_cond"] = speed
+            trial_data = test.trial(
+                options,
+                env_dict[env],
+            )
+
+            movement_start, movement_end = trial_data["epoch_bounds"]["movement"]
+            quarter_movement = movement_start + int((movement_end - movement_start) / 4)
+            segment_start = max(movement_start - 1, 0)
+            activity = trial_data[system][:, segment_start:quarter_movement]
+            speed_timeseries.append(activity)
+
+        target_len = max(activity.shape[1] for activity in speed_timeseries)
+        interpolated_speed_timeseries = []
+        for activity in speed_timeseries:
+            if activity.shape[1] == target_len:
+                interpolated_speed_timeseries.append(activity)
+                continue
+
+            interpolated_trials = []
+            for trial_activity in activity:
+                interpolated_trials.append(
+                    interpolate_trial(trial_activity, target_len).to(
+                        dtype=activity.dtype,
+                        device=activity.device,
+                    )
+                )
+            interpolated_speed_timeseries.append(torch.stack(interpolated_trials))
+
+        timeseries = torch.cat(interpolated_speed_timeseries, dim=0)
+        if average:
+            env_timeseries.append(timeseries.mean(dim=0))
+        else:
+            env_timeseries.append(timeseries)
+
+    return env_timeseries, envs_to_use
+
+
+def delay_movement_pcs(
+    model_name,
+    movement_type,
+    system,
+    average=True,
+    speed_cond=None,
+    delay_cond=1,
+    batch_size=32,
+    add_new_rule_inputs=False,
+):
+    """
+    Plot delay-through-movement activity trajectories in a shared 3D PCA space.
+
+    Parameters mirror ``get_delay_movement_timeseries``. The PCA is fit on all
+    delay and movement timepoints from the selected environments, then each
+    environment's trajectory is plotted with the same task color coding used by
+    ``epoch_pcs``.
+    """
+
+    env_timeseries, envs_to_use = get_delay_movement_timeseries(
+        model_name,
+        movement_type,
+        system,
+        average=average,
+        speed_cond=speed_cond,
+        delay_cond=delay_cond,
+        batch_size=batch_size,
+        add_new_rule_inputs=add_new_rule_inputs,
+    )
+
+    pca = PCA(n_components=3)
+    pca.fit(torch.cat([data.reshape(-1, data.shape[-1]) for data in env_timeseries]))
+
+    colors = plt.cm.tab10(np.linspace(0, 1, len(env_dict)))
+    env_color_dict = {}
+    for env, color in zip(env_dict, colors):
+        env_color_dict[env] = color
+
+    _, ax = ax_3d_no_grid()
+    handles = []
+
+    for env_data, env in zip(env_timeseries, envs_to_use):
+        handles.append(
+            mpatches.Patch(color=env_color_dict[env], label=env, edgecolor="none")
+        )
+
+        if average:
+            trajectories = env_data.unsqueeze(0)
+        else:
+            trajectories = env_data
+
+        for trajectory in trajectories:
+            h_proj = pca.transform(trajectory.detach().cpu().numpy())
+            ax.plot(
+                h_proj[:, 0],
+                h_proj[:, 1],
+                h_proj[:, 2],
+                color=env_color_dict[env],
+                linewidth=4,
+                alpha=0.75,
+            )
+            ax.scatter(
+                h_proj[0, 0],
+                h_proj[0, 1],
+                h_proj[0, 2],
+                marker="^",
+                color=env_color_dict[env],
+                s=150,
+            )
+            ax.scatter(
+                h_proj[-1, 0],
+                h_proj[-1, 1],
+                h_proj[-1, 2],
+                marker="X",
+                color=env_color_dict[env],
+                s=150,
+            )
+
+    ax.legend(handles=handles, frameon=False, fontsize=10)
+
+    save_path = os.path.join(
+        f"results/{model_name}/compositionality/pcs",
+        system,
+        f"delay_movement_{movement_type}_trajectories",
+    )
+    save_fig(save_path, eps=False)
+
+    return pca, env_timeseries, envs_to_use
 
 
 def epoch_pcs(
